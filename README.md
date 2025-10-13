@@ -1,3 +1,5 @@
+# 🧠 Content Management Backend (FastAPI)
+```
 📁backend
 └──
     ├── 📜.gitignore
@@ -88,8 +90,7 @@
         ├── 🐍init_db.py
         ├── 📜run_dev.sh
         └── 📜deploy.sh
-
-# 🧠 Content Management Backend (FastAPI)
+```
 
 ## Overview
 This backend powers the automated content management and social posting system.  
