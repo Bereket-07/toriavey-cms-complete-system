@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from src.controllers.clips_controller import router as clips_router
+from src.controllers.content_controller import router as content_router
 
 # Configure logging
 logging.basicConfig(
@@ -21,17 +22,34 @@ app = FastAPI(
     Automated content management and social media posting system.
     
     ## Features
+    
+    ### Video Clips (Vizard AI)
     * 🎬 Generate video clips from any source using Vizard AI
-    * 📱 Support for multiple platforms (YouTube Shorts, TikTok, Instagram, etc.)
+    * 📱 Support for multiple platforms (YouTube Shorts, TikTok, Instagram Reels, etc.)
     * ✅ Review and approve clips before posting
     * 🚀 Automated posting to social media
+    
+    ### Recipe Content (LLM-Powered)
+    * 🍳 Scrape recipes from any website
+    * 🤖 AI-generated captions and hashtags using Gemini
+    * 📝 Platform-optimized content (Instagram, Twitter, Threads, etc.)
+    * ✏️ Edit and regenerate content
     * 📊 Track posting status and analytics
     
-    ## Workflow
+    ## Workflows
+    
+    ### Video Clips Workflow
     1. **Generate Clips**: Submit a video URL to create clips for multiple platforms
     2. **Review**: View pending clips in the dashboard
     3. **Approve/Reject**: Decide which clips to post
     4. **Post**: Publish approved clips to social media
+    
+    ### Recipe Content Workflow
+    1. **Generate Content**: Submit recipe URL(s) to scrape and generate posts
+    2. **Review**: View AI-generated captions, hashtags, and images
+    3. **Edit/Regenerate**: Refine content or regenerate with different parameters
+    4. **Approve/Reject**: Decide which posts to publish
+    5. **Post**: Publish approved content to social platforms
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -49,6 +67,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(clips_router)
+app.include_router(content_router)
 
 # Root endpoint
 @app.get("/")
@@ -60,7 +79,8 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
-            "clips": "/api/clips"
+            "clips": "/api/clips",
+            "content": "/api/content"
         }
     }
 
@@ -81,6 +101,7 @@ async def startup_event():
     logger.info("🚀 Tori Avey CMS API starting up...")
     logger.info("📚 API Documentation available at /docs")
     logger.info("🎬 Clips Management API ready at /api/clips")
+    logger.info("🍳 Content Management API ready at /api/content")
 
 # Shutdown event
 @app.on_event("shutdown")

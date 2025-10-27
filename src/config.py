@@ -21,3 +21,6 @@ COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY", "")
 # Vizard AI API Configuration
 VIZARD_API_KEY = os.getenv("VIZARD_API_KEY", "")
 VIZARD_API_BASE_URL = "https://elb-api.vizard.ai/hvizard-server-front/open-api/v1"
+
+# Google Gemini API Configuration
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
