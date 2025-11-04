@@ -7,13 +7,16 @@ from typing import List, Optional
 from src.domain.schemas.content_schemas import (
     GenerateContentFromRecipeRequest,
     GenerateContentBatchRequest,
+    SelectAlternativeCaptionRequest,
     EditContentRequest,
     ApproveContentRequest,
     RejectContentRequest,
     PostContentRequest,
     RegenerateContentRequest,
+    SimpleGenerateContentResponse,
     GenerateContentResponse,
     GenerateBatchResponse,
+    SelectCaptionResponse,
     PendingContentsResponse,
     PostContentResponse,
     EditContentResponse,
@@ -30,16 +33,16 @@ router = APIRouter(prefix="/api/content", tags=["Content Management"])
 
 # ============= CONTENT GENERATION ENDPOINTS =============
 
-@router.post("/generate", response_model=GenerateContentResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/generate", response_model=SimpleGenerateContentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def generate_content_from_recipe(
     request: GenerateContentFromRecipeRequest,
     background_tasks: BackgroundTasks
 ):
     """
-    Generate social media content from a recipe URL.
+    Generate social media content from recipe data (from database).
     
     **Workflow:**
-    1. Scrapes recipe data from the provided URL
+    1. Receives recipe data from your database
     2. Uses LLM (Gemini) to generate platform-optimized content
     3. Creates engaging captions with hashtags for each platform
     4. Content appears in pending dashboard for review
@@ -51,15 +54,40 @@ async def generate_content_from_recipe(
     - Facebook
     - LinkedIn
     - Pinterest
+    
+    **Example Request:**
+    ```json
+    {
+      "recipe_id": 123,
+      "recipe_data": {
+        "title": "Classic Chocolate Chip Cookies",
+        "description": "The best chocolate chip cookies...",
+        "ingredients": ["2 cups flour", "1 cup butter", "..."],
+        "instructions": ["Preheat oven to 350°F", "Mix ingredients", "..."],
+        "prep_time": "15 minutes",
+        "cook_time": "12 minutes",
+        "servings": "24 cookies",
+        "cuisine": "American",
+        "image_url": "https://example.com/image.jpg"
+      },
+      "target_platforms": ["instagram", "twitter", "threads"],
+      "tone": "warm and inviting",
+      "include_emojis": true,
+      "max_hashtags": 10
+    }
+    ```
     """
     try:
-        logger.info(f"Generating content for {len(request.target_platforms)} platforms")
+        logger.info(f"Generating content for {len(request.target_platforms)} platforms from recipe: {request.recipe_data.title}")
         
         use_case = GenerateContentUseCase()
         
-        # Generate content in background
-        result = await use_case.generate_from_recipe_url(
-            recipe_url=str(request.recipe_url),
+        # Convert RecipeDataInput to dict
+        recipe_dict = request.recipe_data.model_dump()
+        
+        # Generate content
+        result = await use_case.generate_from_recipe_data(
+            recipe_data=recipe_dict,
             target_platforms=request.target_platforms,
             tone=request.tone,
             include_emojis=request.include_emojis,
@@ -67,7 +95,7 @@ async def generate_content_from_recipe(
             custom_instructions=request.custom_instructions
         )
         
-        # TODO: Save to database
+        # TODO: Save to database with recipe_id if provided
         
         # Extract successful generations
         successful_contents = [
@@ -75,11 +103,36 @@ async def generate_content_from_recipe(
             if "error" not in c
         ]
         
-        return GenerateContentResponse(
+        # Map generated contents to response format
+        mapped_contents = []
+        for content_item in successful_contents:
+            mapped_contents.append({
+                "platform": content_item["platform"].value,
+                "caption": content_item["content"].caption,
+                "hashtags": content_item["content"].hashtags,
+                "platform_specific": content_item["content"].platform_specific,
+                "image_suggestions": getattr(content_item["content"], "image_suggestions", []),
+                "alternative_captions": getattr(content_item["content"], "alternative_captions", []),
+                "selected_caption_index": 0  # Default to main caption
+            })
+        
+        # Map recipe data
+        recipe_response = {
+            "title": result["recipe"].title,
+            "description": result["recipe"].description,
+            "url": result["recipe"].url,
+            "image_url": result["recipe"].image_url,
+            "cuisine": result["recipe"].cuisine,
+            "prep_time": result["recipe"].prep_time,
+            "cook_time": result["recipe"].cook_time,
+            "servings": result["recipe"].servings
+        }
+        
+        return SimpleGenerateContentResponse(
             success=len(successful_contents) > 0,
             message=f"Generated content for {len(successful_contents)} platform(s)",
-            generated_contents=[],  # TODO: Map to response schema
-            recipe=None,  # TODO: Map recipe data
+            generated_contents=mapped_contents,
+            recipe=recipe_response,
             total_generated=len(successful_contents)
         )
         
@@ -97,32 +150,121 @@ async def generate_content_from_recipe(
         )
 
 
+@router.post("/select-caption", response_model=SimpleGenerateContentResponse, status_code=status.HTTP_200_OK)
+async def select_alternative_caption(
+    request: SelectAlternativeCaptionRequest,
+    generated_content: SimpleGenerateContentResponse
+):
+    """
+    Select an alternative caption from the generated content.
+    
+    This endpoint allows you to switch between the main caption and alternative captions.
+    
+    **How it works:**
+    1. After generating content, you get a main caption and alternative_captions list
+    2. Use this endpoint to select which caption to use
+    3. caption_index: 0 = main caption, 1 = first alternative, 2 = second alternative, etc.
+    
+    **Example Request:**
+    ```json
+    {
+      "platform": "instagram",
+      "caption_index": 1
+    }
+    ```
+    
+    **Response:**
+    Returns the updated content with the selected caption as the main caption.
+    """
+    try:
+        logger.info(f"Selecting caption index {request.caption_index} for platform {request.platform}")
+        
+        # Find the content for the specified platform
+        platform_content = None
+        for content in generated_content.generated_contents:
+            if content["platform"] == request.platform.value:
+                platform_content = content
+                break
+        
+        if not platform_content:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Content for platform '{request.platform.value}' not found"
+            )
+        
+        # Get all available captions (main + alternatives)
+        all_captions = [platform_content["caption"]] + platform_content.get("alternative_captions", [])
+        
+        # Validate caption index
+        if request.caption_index >= len(all_captions):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Caption index {request.caption_index} out of range. Available: 0-{len(all_captions)-1}"
+            )
+        
+        # Select the caption
+        selected_caption = all_captions[request.caption_index]
+        
+        # Update the content
+        platform_content["caption"] = selected_caption
+        platform_content["selected_caption_index"] = request.caption_index
+        
+        logger.info(f"Caption selected successfully for {request.platform.value}")
+        
+        return generated_content
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to select caption: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to select caption: {str(e)}"
+        )
+
+
 @router.post("/generate-batch", response_model=GenerateBatchResponse, status_code=status.HTTP_202_ACCEPTED)
 async def generate_content_batch(
     request: GenerateContentBatchRequest,
     background_tasks: BackgroundTasks
 ):
     """
-    Generate content from multiple recipe URLs in batch.
+    Generate content from multiple recipes in batch (using recipe IDs from database).
     
     Useful for bulk content creation from a list of recipes.
     Processing happens in the background.
+    
+    **Example Request:**
+    ```json
+    {
+      "recipe_ids": [123, 456, 789],
+      "target_platforms": ["instagram", "twitter"],
+      "batch_name": "Weekly Recipe Posts",
+      "tone": "engaging and friendly",
+      "include_emojis": true,
+      "max_hashtags": 10
+    }
+    ```
+    
+    **Note:** You need to fetch recipe data from your database using these IDs
+    and call the /generate endpoint for each recipe.
     """
     try:
-        logger.info(f"Starting batch generation for {len(request.recipe_urls)} recipes")
+        logger.info(f"Starting batch generation for {len(request.recipe_ids)} recipes")
         
         # TODO: Create batch record in database
         batch_id = 1  # Placeholder
         
-        # Process in background
+        # TODO: Fetch recipes from database using recipe_ids
+        # TODO: Process each recipe in background
         # background_tasks.add_task(process_batch, ...)
         
         return GenerateBatchResponse(
             success=True,
-            message=f"Batch processing started for {len(request.recipe_urls)} recipes",
+            message=f"Batch processing started for {len(request.recipe_ids)} recipes",
             batch_id=batch_id,
             batch_name=request.batch_name or f"Batch {batch_id}",
-            total_items=len(request.recipe_urls),
+            total_items=len(request.recipe_ids),
             processed_items=0,
             successful_items=0,
             failed_items=0,

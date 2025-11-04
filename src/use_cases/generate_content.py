@@ -10,7 +10,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from src.config import GOOGLE_API_KEY
-from src.infrastructure.scrapers.recipe_scraper import RecipeScraperService
 from src.domain.schemas.content_schemas import (
     ScrapedRecipeData,
     ContentGenerationContext,
@@ -128,12 +127,11 @@ class GenerateContentUseCase:
     """
     
     def __init__(self):
-        self.scraper = RecipeScraperService()
         self.llm = content_generator_llm
     
-    async def generate_from_recipe_url(
+    async def generate_from_recipe_data(
         self,
-        recipe_url: str,
+        recipe_data: Dict[str, Any],
         target_platforms: List[ContentPlatform],
         tone: str = "engaging and friendly",
         include_emojis: bool = True,
@@ -141,10 +139,12 @@ class GenerateContentUseCase:
         custom_instructions: str = None
     ) -> Dict[str, Any]:
         """
-        Generate social media content from a recipe URL.
+        Generate social media content from recipe data (from database).
         
         Args:
-            recipe_url: URL of the recipe to scrape
+            recipe_data: Dictionary containing recipe information from database
+                Expected keys: title, description, ingredients, instructions, 
+                              prep_time, cook_time, servings, cuisine, image_url
             target_platforms: List of platforms to generate content for
             tone: Tone of the content
             include_emojis: Whether to include emojis
@@ -154,14 +154,24 @@ class GenerateContentUseCase:
         Returns:
             Dictionary with recipe data and generated contents
         """
-        logger.info(f"Generating content for {len(target_platforms)} platforms from {recipe_url}")
+        logger.info(f"Generating content for {len(target_platforms)} platforms from recipe: {recipe_data.get('title')}")
         
-        # Step 1: Scrape recipe
-        try:
-            recipe_data = await self.scraper.scrape_recipe(recipe_url)
-        except Exception as e:
-            logger.error(f"Failed to scrape recipe: {e}")
-            raise ValueError(f"Could not scrape recipe from URL: {str(e)}")
+        # Step 1: Convert recipe data to ScrapedRecipeData format
+        recipe = ScrapedRecipeData(
+            title=recipe_data.get('title', 'Untitled Recipe'),
+            description=recipe_data.get('description'),
+            url=recipe_data.get('url', ''),
+            image_url=recipe_data.get('image_url'),
+            ingredients=recipe_data.get('ingredients', []),
+            instructions=recipe_data.get('instructions', []),
+            prep_time=recipe_data.get('prep_time'),
+            cook_time=recipe_data.get('cook_time'),
+            total_time=recipe_data.get('total_time'),
+            servings=recipe_data.get('servings'),
+            cuisine=recipe_data.get('cuisine'),
+            category=recipe_data.get('category'),
+            tags=recipe_data.get('tags', [])
+        )
         
         # Step 2: Generate content for each platform
         generated_contents = []
@@ -169,7 +179,7 @@ class GenerateContentUseCase:
         for platform in target_platforms:
             try:
                 content = await self._generate_content_for_platform(
-                    recipe=recipe_data,
+                    recipe=recipe,
                     platform=platform,
                     tone=tone,
                     include_emojis=include_emojis,
@@ -189,7 +199,7 @@ class GenerateContentUseCase:
                 })
         
         return {
-            "recipe": recipe_data,
+            "recipe": recipe,
             "generated_contents": generated_contents
         }
     

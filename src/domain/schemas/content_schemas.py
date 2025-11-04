@@ -10,9 +10,27 @@ from src.domain.models.content_model import ContentStatus, ContentPlatform, Cont
 
 # ============= REQUEST SCHEMAS =============
 
+class RecipeDataInput(BaseModel):
+    """Recipe data from database"""
+    title: str = Field(description="Recipe title")
+    description: Optional[str] = Field(default=None, description="Recipe description")
+    url: Optional[str] = Field(default=None, description="Original recipe URL")
+    image_url: Optional[str] = Field(default=None, description="Recipe image URL")
+    ingredients: List[str] = Field(default=[], description="List of ingredients")
+    instructions: List[str] = Field(default=[], description="List of instructions")
+    prep_time: Optional[str] = Field(default=None, description="Preparation time")
+    cook_time: Optional[str] = Field(default=None, description="Cooking time")
+    total_time: Optional[str] = Field(default=None, description="Total time")
+    servings: Optional[str] = Field(default=None, description="Number of servings")
+    cuisine: Optional[str] = Field(default=None, description="Cuisine type")
+    category: Optional[str] = Field(default=None, description="Recipe category")
+    tags: List[str] = Field(default=[], description="Recipe tags")
+
+
 class GenerateContentFromRecipeRequest(BaseModel):
-    """Request to generate social media content from a recipe URL"""
-    recipe_url: HttpUrl = Field(description="URL of the recipe to scrape and generate content from")
+    """Request to generate social media content from recipe data (from database)"""
+    recipe_id: Optional[int] = Field(default=None, description="Recipe ID from database (if applicable)")
+    recipe_data: RecipeDataInput = Field(description="Recipe data from database")
     target_platforms: List[ContentPlatform] = Field(
         description="Platforms to generate content for",
         min_items=1
@@ -31,12 +49,21 @@ class GenerateContentFromRecipeRequest(BaseModel):
 
 class GenerateContentBatchRequest(BaseModel):
     """Request to generate content from multiple recipes"""
-    recipe_urls: List[HttpUrl] = Field(description="List of recipe URLs", min_items=1)
+    recipe_ids: List[int] = Field(description="List of recipe IDs from database", min_items=1)
     target_platforms: List[ContentPlatform]
     batch_name: Optional[str] = Field(default=None, description="Name for this batch")
     tone: Optional[str] = Field(default="engaging and friendly")
     include_emojis: bool = Field(default=True)
     max_hashtags: int = Field(default=10, ge=1, le=30)
+
+
+class SelectAlternativeCaptionRequest(BaseModel):
+    """Request to select an alternative caption"""
+    platform: ContentPlatform = Field(description="Platform to update")
+    caption_index: int = Field(
+        description="Index of alternative caption to use (0 = main caption, 1+ = alternative captions)",
+        ge=0
+    )
 
 
 class EditContentRequest(BaseModel):
@@ -86,8 +113,34 @@ class RegenerateContentRequest(BaseModel):
 
 # ============= RESPONSE SCHEMAS =============
 
+class SimpleRecipeResponse(BaseModel):
+    """Simplified recipe data response (for generation)"""
+    title: str
+    description: Optional[str] = None
+    url: Optional[str] = None
+    image_url: Optional[str] = None
+    cuisine: Optional[str] = None
+    prep_time: Optional[str] = None
+    cook_time: Optional[str] = None
+    servings: Optional[str] = None
+
+
+class SimpleGeneratedContentResponse(BaseModel):
+    """Simplified generated content response (for generation)"""
+    platform: str
+    caption: str
+    hashtags: List[str]
+    platform_specific: Dict[str, Any]
+    image_suggestions: Optional[List[str]] = []
+    alternative_captions: Optional[List[str]] = []
+    selected_caption_index: int = Field(
+        default=0,
+        description="Index of currently selected caption (0 = main, 1+ = alternatives)"
+    )
+
+
 class RecipeResponse(BaseModel):
-    """Recipe data response"""
+    """Recipe data response (full database model)"""
     id: int
     title: str
     url: str
@@ -134,8 +187,17 @@ class ContentWithRecipeResponse(BaseModel):
     social_posts: List[Dict[str, Any]] = []
 
 
+class SimpleGenerateContentResponse(BaseModel):
+    """Simplified response after generating content (no database fields)"""
+    success: bool
+    message: str
+    generated_contents: List[SimpleGeneratedContentResponse]
+    recipe: Optional[SimpleRecipeResponse]
+    total_generated: int
+
+
 class GenerateContentResponse(BaseModel):
-    """Response after generating content"""
+    """Response after generating content (with database fields)"""
     success: bool
     message: str
     generated_contents: List[GeneratedContentResponse]
@@ -178,6 +240,15 @@ class EditContentResponse(BaseModel):
     success: bool
     message: str
     content: GeneratedContentResponse
+
+
+class SelectCaptionResponse(BaseModel):
+    """Response after selecting alternative caption"""
+    success: bool
+    message: str
+    platform: str
+    selected_caption: str
+    selected_index: int
 
 
 class ContentStatsResponse(BaseModel):

@@ -2,7 +2,8 @@
 
 import logging
 from typing import Dict, Any, List, Optional
-from composio import Action
+# from composio import Action
+from composio import Action          # <-- changed
 
 from src.infrastructure.apis.composio import ComposioExecutorService
 

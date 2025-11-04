@@ -1,5 +1,4 @@
 # src/use_cases/composio_executor_service.py
-
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
@@ -48,14 +47,12 @@ class ComposioExecutorService:
 
         connected_accounts: List[Any] = await asyncio.to_thread(self.toolset.get_connected_accounts)
         
-        # --- ✅ THE FINAL FIX: A more robust check for the connected account ---
+        # --- THE FINAL FIX: A more robust check for the connected account ---
         is_connected = False
         for acc in connected_accounts:
-            # Check for the `appName` attribute, which might exist as a string
             if hasattr(acc, 'appName') and isinstance(acc.appName, str) and acc.appName.upper() == app_name.upper():
                 is_connected = True
                 break
-            # Check for the `app.value` attribute, which is the expected enum path
             if hasattr(acc, 'app') and hasattr(acc.app, 'value') and acc.app.value.upper() == app_name.upper():
                 is_connected = True
                 break
@@ -70,7 +67,6 @@ class ComposioExecutorService:
         if not app_enum:
             raise ValueError(f"App '{app_name}' is not a valid Composio App.")
 
-        # Get the auth_config_id for this app
         auth_config_id = self.auth_config_map.get(app_name.upper())
         print(f"Auth config ID for {app_name}: {auth_config_id}")
         if not auth_config_id:
@@ -80,18 +76,14 @@ class ComposioExecutorService:
         logger.info(f"Using auth_config_id '{auth_config_id}' for app '{app_name}'")
 
         try:
-            # ✅ FIX: Use the correct composio API for initiating connections
-            # Based on composio documentation, we need to pass auth_config with the auth_config_id
             logger.info(f"Initiating connection for app '{app_name}' with auth_config_id '{auth_config_id}'")
-            
-            # Create the auth_config parameter as expected by the API
             auth_config = {"id": auth_config_id}
             
             oauth_request = await asyncio.to_thread(
                 lambda: self.toolset.initiate_connection(
                     app=app_enum,
                     entity_id=self.entity_id,
-                    auth_config=auth_config,  # This is the correct parameter name
+                    auth_config=auth_config,
                     connected_account_params=api_key_params or {}
                 )
             )
@@ -107,7 +99,7 @@ class ComposioExecutorService:
             
             raise ConnectionError(f"Could not determine authentication method for {app_name}.")
 
-        except InvalidParams as e:
+        except InvalidParams as e:               # <-- now works with the shim
             error_str = str(e).lower()
             if 'connected_account_params' in error_str:
                 logger.info(f"{app_name} requires an API key. Raising challenge.")
@@ -115,7 +107,9 @@ class ComposioExecutorService:
             else:
                 raise e
     
-    # ... (rest of the file is unchanged) ...
+    # -----------------------------------------------------------------
+    #  The rest of your methods – **unchanged**
+    # -----------------------------------------------------------------
     async def get_actions_for_app(self, app_name: str) -> List[Action]:
         logger.info(f"Fetching actions for app: {app_name}")
         app_enum = getattr(App, app_name.upper(), None)
@@ -149,19 +143,18 @@ class ComposioExecutorService:
         except Exception as e:
             logger.error(f"Execution of action '{action.name}' failed: {e}", exc_info=True)
             raise
+
     async def get_linkedin_author_urn(self) -> str:
         """Fetch the LinkedIn URN (author_id) for the authenticated user."""
         app_enum = App.LINKEDIN
         actions = await self.get_actions_for_app("linkedin")
 
-        # Find the correct action
         get_user_info_action = next(
             (a for a in actions if a.name.upper() == "LINKEDIN_GET_USER_INFO"), None
         )
         if not get_user_info_action:
             raise ValueError("Could not find LINKEDIN_GET_USER_INFO action.")
 
-        # Execute the action
         result = await self.execute_action(get_user_info_action, params={})
         urn = result.get("id") or result.get("author_id") or result.get("urn")
 
