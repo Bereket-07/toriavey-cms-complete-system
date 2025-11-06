@@ -27,7 +27,6 @@ from src.domain.schemas.content_schemas import (
 )
 from src.use_cases.generate_content import GenerateContentUseCase
 from src.use_cases.manage_content import ManageContentUseCase
-from src.use_cases.batch_generate_content import BatchGenerateContentUseCase
 from src.infrastructure.repository.recipe_repo import RecipeRepository
 from src.infrastructure.repository.wprm_recipe_repo import WPRMRecipeRepository
 from src.infrastructure.repository.wprm_content_status_repo import WPRMContentStatusRepository
@@ -657,72 +656,8 @@ async def health_check():
 
 
 # ============= BATCH GENERATION FROM UNPROCESSED RECIPES =============
-
-@router.post("/generate-from-unprocessed", response_model=BatchGenerateFromUnprocessedResponse, status_code=status.HTTP_202_ACCEPTED)
-async def generate_content_from_unprocessed_recipes(
-    request: BatchGenerateFromUnprocessedRequest,
-    background_tasks: BackgroundTasks
-):
-    """
-    Generate content from all unprocessed recipes (content_generated=False).
-    
-    This endpoint automatically fetches recipes that haven't had content generated yet
-    and creates social media posts for the specified platforms.
-    
-    **Workflow:**
-    1. Fetches recipes with content_generated=False from database
-    2. Generates platform-optimized content for each recipe
-    3. Marks recipes as content_generated=True after successful generation
-    4. Skips recipes that fail and continues with the next
-    
-    **Example Request:**
-    ```json
-    {
-      "target_platforms": ["instagram", "twitter", "facebook"],
-      "limit": 10,
-      "tone": "warm and inviting",
-      "include_emojis": true,
-      "max_hashtags": 10
-    }
-    ```
-    
-    **Parameters:**
-    - `target_platforms`: List of social media platforms to generate content for
-    - `limit`: Maximum number of recipes to process (optional, processes all if not specified)
-    - `tone`: Tone of the generated content (default: "engaging and friendly")
-    - `include_emojis`: Whether to include emojis in captions (default: true)
-    - `max_hashtags`: Maximum number of hashtags per post (default: 10)
-    
-    **Response:**
-    Returns summary of batch processing including:
-    - Total recipes found
-    - Number processed
-    - Number successful
-    - Number failed
-    - Detailed results for each recipe
-    """
-    try:
-        logger.info(f"Starting batch generation from unprocessed recipes (limit={request.limit})")
-        
-        use_case = BatchGenerateContentUseCase()
-        
-        # Generate content for unprocessed recipes
-        result = await use_case.generate_from_unprocessed_recipes(
-            target_platforms=request.target_platforms,
-            limit=request.limit,
-            tone=request.tone,
-            include_emojis=request.include_emojis,
-            max_hashtags=request.max_hashtags
-        )
-        
-        return BatchGenerateFromUnprocessedResponse(**result)
-        
-    except Exception as e:
-        logger.error(f"Failed to generate content from unprocessed recipes: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate content: {str(e)}"
-        )
+# NOTE: This functionality is now handled by the WPRM Scheduler
+# Use /api/wprm-scheduler/run-now or /api/wprm-scheduler/generate-batch instead
 
 
 @router.get("/generation-stats", response_model=ContentGenerationStatsResponse)

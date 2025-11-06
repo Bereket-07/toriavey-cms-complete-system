@@ -6,7 +6,6 @@ import logging
 
 from src.controllers.clips_controller import router as clips_router
 from src.controllers.content_controller import router as content_router
-from src.controllers.scheduler_controller import router as scheduler_router
 from src.controllers.opus_clip_controller import router as opus_router
 from src.controllers.wprm_scheduler_controller import router as wprm_scheduler_router
 
@@ -71,7 +70,6 @@ app.add_middleware(
 # Include routers
 app.include_router(clips_router)
 app.include_router(content_router)
-app.include_router(scheduler_router)
 app.include_router(opus_router)
 app.include_router(wprm_scheduler_router)
 
@@ -86,10 +84,9 @@ async def root():
         "health": "/health",
         "endpoints": {
             "clips": "/api/clips",
-            "content": "/api/content",
-            "scheduler": "/api/scheduler",
+            "content": "/api/content (WPRM Recipes)",
             "opus": "/api/opus",
-            "wprm_scheduler": "/api/wprm-scheduler"
+            "scheduler": "/api/wprm-scheduler (WPRM Content Scheduler)"
         }
     }
 
@@ -110,10 +107,9 @@ async def startup_event():
     logger.info("🚀 Tori Avey CMS API starting up...")
     logger.info("📚 API Documentation available at /docs")
     logger.info("🎬 Clips Management API ready at /api/clips")
-    logger.info("🍳 Content Management API ready at /api/content")
-    logger.info("⏰ Scheduler API ready at /api/scheduler")
+    logger.info("🍳 WPRM Content Management API ready at /api/content")
     logger.info("🎥 OpusClip API ready at /api/opus")
-    logger.info("📅 WPRM Scheduler API ready at /api/wprm-scheduler")
+    logger.info("📅 WPRM Content Scheduler API ready at /api/wprm-scheduler")
 
 # Shutdown event
 @app.on_event("shutdown")
