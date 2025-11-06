@@ -14,3 +14,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def get_db():
+    """Get database session"""
+    db = SessionLocal()
+    try:
+        return db
+    finally:
+        pass  # Session will be closed by context manager

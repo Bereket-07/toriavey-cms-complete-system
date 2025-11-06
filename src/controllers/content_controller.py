@@ -3,6 +3,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, status
 from typing import List, Optional
+from pydantic import BaseModel
 
 from src.domain.schemas.content_schemas import (
     GenerateContentFromRecipeRequest,
@@ -21,14 +22,50 @@ from src.domain.schemas.content_schemas import (
     PostContentResponse,
     EditContentResponse,
     ContentWithRecipeResponse,
-    ContentStatsResponse
+    ContentStatsResponse,
+    ContentPlatform
 )
 from src.use_cases.generate_content import GenerateContentUseCase
 from src.use_cases.manage_content import ManageContentUseCase
+from src.use_cases.batch_generate_content import BatchGenerateContentUseCase
+from src.infrastructure.repository.recipe_repo import RecipeRepository
+from src.infrastructure.repository.wprm_recipe_repo import WPRMRecipeRepository
+from src.infrastructure.repository.wprm_content_status_repo import WPRMContentStatusRepository
+from src.domain.models.wprm_content_status_model import ContentStatus
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/content", tags=["Content Management"])
+
+
+# ============= REQUEST/RESPONSE SCHEMAS FOR NEW ENDPOINTS =============
+
+class BatchGenerateFromUnprocessedRequest(BaseModel):
+    """Request to generate content from unprocessed recipes"""
+    target_platforms: List[ContentPlatform]
+    limit: Optional[int] = None
+    tone: str = "engaging and friendly"
+    include_emojis: bool = True
+    max_hashtags: int = 10
+
+
+class BatchGenerateFromUnprocessedResponse(BaseModel):
+    """Response from batch generation"""
+    success: bool
+    message: str
+    total_recipes: int
+    processed: int
+    successful: int
+    failed: int
+    results: List[dict]
+
+
+class ContentGenerationStatsResponse(BaseModel):
+    """Statistics about content generation status"""
+    total_recipes: int
+    content_generated: int
+    pending_generation: int
+    completion_percentage: float
 
 
 # ============= CONTENT GENERATION ENDPOINTS =============
@@ -603,6 +640,8 @@ async def health_check():
         "endpoints": [
             "POST /api/content/generate",
             "POST /api/content/generate-batch",
+            "POST /api/content/generate-from-unprocessed",
+            "GET /api/content/generation-stats",
             "GET /api/content/pending",
             "GET /api/content/content/{content_id}",
             "GET /api/content/stats",
@@ -615,3 +654,710 @@ async def health_check():
             "POST /api/content/bulk-post"
         ]
     }
+
+
+# ============= BATCH GENERATION FROM UNPROCESSED RECIPES =============
+
+@router.post("/generate-from-unprocessed", response_model=BatchGenerateFromUnprocessedResponse, status_code=status.HTTP_202_ACCEPTED)
+async def generate_content_from_unprocessed_recipes(
+    request: BatchGenerateFromUnprocessedRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate content from all unprocessed recipes (content_generated=False).
+    
+    This endpoint automatically fetches recipes that haven't had content generated yet
+    and creates social media posts for the specified platforms.
+    
+    **Workflow:**
+    1. Fetches recipes with content_generated=False from database
+    2. Generates platform-optimized content for each recipe
+    3. Marks recipes as content_generated=True after successful generation
+    4. Skips recipes that fail and continues with the next
+    
+    **Example Request:**
+    ```json
+    {
+      "target_platforms": ["instagram", "twitter", "facebook"],
+      "limit": 10,
+      "tone": "warm and inviting",
+      "include_emojis": true,
+      "max_hashtags": 10
+    }
+    ```
+    
+    **Parameters:**
+    - `target_platforms`: List of social media platforms to generate content for
+    - `limit`: Maximum number of recipes to process (optional, processes all if not specified)
+    - `tone`: Tone of the generated content (default: "engaging and friendly")
+    - `include_emojis`: Whether to include emojis in captions (default: true)
+    - `max_hashtags`: Maximum number of hashtags per post (default: 10)
+    
+    **Response:**
+    Returns summary of batch processing including:
+    - Total recipes found
+    - Number processed
+    - Number successful
+    - Number failed
+    - Detailed results for each recipe
+    """
+    try:
+        logger.info(f"Starting batch generation from unprocessed recipes (limit={request.limit})")
+        
+        use_case = BatchGenerateContentUseCase()
+        
+        # Generate content for unprocessed recipes
+        result = await use_case.generate_from_unprocessed_recipes(
+            target_platforms=request.target_platforms,
+            limit=request.limit,
+            tone=request.tone,
+            include_emojis=request.include_emojis,
+            max_hashtags=request.max_hashtags
+        )
+        
+        return BatchGenerateFromUnprocessedResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate content from unprocessed recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate content: {str(e)}"
+        )
+
+
+@router.get("/generation-stats", response_model=ContentGenerationStatsResponse)
+async def get_content_generation_stats():
+    """
+    Get statistics about content generation status for recipes.
+    
+    Returns:
+    - Total number of recipes in database
+    - Number of recipes with content generated
+    - Number of recipes pending content generation
+    - Completion percentage
+    
+    **Example Response:**
+    ```json
+    {
+      "total_recipes": 150,
+      "content_generated": 100,
+      "pending_generation": 50,
+      "completion_percentage": 66.67
+    }
+    ```
+    """
+    try:
+        repo = RecipeRepository()
+        stats = repo.get_content_generation_stats()
+        
+        return ContentGenerationStatsResponse(**stats)
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch generation stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/unprocessed-recipes")
+async def get_unprocessed_recipes(limit: int = 10):
+    """
+    Get a list of unprocessed recipes (content not yet generated)
+    
+    Args:
+        limit: Maximum number of recipes to return (default: 10)
+    
+    Returns:
+        List of unprocessed recipes with their details
+    """
+    try:
+        recipe_repo = RecipeRepository()
+        unprocessed = recipe_repo.fetch_unprocessed_recipes(limit=limit)
+        
+        return {
+            "success": True,
+            "total_unprocessed": len(unprocessed),
+            "limit": limit,
+            "recipes": unprocessed
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch unprocessed recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/all-recipes")
+async def get_all_recipes(limit: int = 20, offset: int = 0):
+    """
+    Get ALL recipes from the database (processed and unprocessed)
+    
+    Args:
+        limit: Maximum number of recipes to return (default: 20)
+        offset: Number of recipes to skip (for pagination, default: 0)
+    
+    Returns:
+        List of all recipes with their details and total count
+    """
+    try:
+        recipe_repo = RecipeRepository()
+        all_recipes = recipe_repo.fetch_all()
+        
+        # Get total count
+        total_count = len(all_recipes)
+        
+        # Apply pagination
+        paginated_recipes = all_recipes[offset:offset + limit]
+        
+        return {
+            "success": True,
+            "total_recipes": total_count,
+            "limit": limit,
+            "offset": offset,
+            "returned": len(paginated_recipes),
+            "recipes": paginated_recipes
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch all recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/recipes-count")
+async def get_recipes_count():
+    """
+    Get total count of recipes in the database
+    
+    Returns:
+        Total number of recipes, processed count, and unprocessed count
+    """
+    try:
+        recipe_repo = RecipeRepository()
+        stats = recipe_repo.get_content_generation_stats()
+        
+        return {
+            "success": True,
+            "total_recipes": stats["total_recipes"],
+            "content_generated": stats["content_generated"],
+            "pending_generation": stats["pending_generation"],
+            "completion_percentage": stats["completion_percentage"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get recipes count: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes")
+async def get_wprm_recipes(limit: int = 20, offset: int = 0):
+    """
+    Get WordPress Recipe Maker (WPRM) recipes from wp_tori_posts
+    
+    This accesses the actual recipe database with 763+ recipes!
+    
+    Args:
+        limit: Maximum number of recipes to return (default: 20)
+        offset: Number of recipes to skip (for pagination, default: 0)
+    
+    Returns:
+        List of WPRM recipes with full metadata, ingredients, instructions, and images
+    """
+    try:
+        wprm_repo = WPRMRecipeRepository()
+        result = wprm_repo.get_all_recipes(limit=limit, offset=offset)
+        
+        return {
+            "success": True,
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch WPRM recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes/{recipe_id}")
+async def get_wprm_recipe_by_id(recipe_id: int):
+    """
+    Get a single WPRM recipe by ID
+    
+    Args:
+        recipe_id: Recipe post ID
+    
+    Returns:
+        Complete recipe data with metadata, ingredients, instructions, and images
+    """
+    try:
+        wprm_repo = WPRMRecipeRepository()
+        recipe = wprm_repo.get_recipe_by_id(recipe_id)
+        
+        if not recipe:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Recipe with ID {recipe_id} not found"
+            )
+        
+        return {
+            "success": True,
+            "recipe": recipe
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch WPRM recipe {recipe_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes-count")
+async def get_wprm_recipes_count():
+    """
+    Get total count of WPRM recipes
+    
+    Returns:
+        Total number of published WPRM recipes
+    """
+    try:
+        wprm_repo = WPRMRecipeRepository()
+        count = wprm_repo.get_recipe_count()
+        
+        return {
+            "success": True,
+            "total_recipes": count,
+            "source": "wp_tori_posts (post_type='wprm_recipe')"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get WPRM recipes count: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes/search/{query}")
+async def search_wprm_recipes(query: str, limit: int = 20):
+    """
+    Search WPRM recipes by title
+    
+    Args:
+        query: Search query
+        limit: Maximum results (default: 20)
+    
+    Returns:
+        List of matching recipes
+    """
+    try:
+        wprm_repo = WPRMRecipeRepository()
+        recipes = wprm_repo.search_recipes(query, limit)
+        
+        return {
+            "success": True,
+            "query": query,
+            "total_found": len(recipes),
+            "recipes": recipes
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to search WPRM recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# ============= WPRM CONTENT STATUS ENDPOINTS =============
+
+@router.get("/wprm-status-summary")
+async def get_wprm_status_summary():
+    """
+    Get summary of WPRM content generation status
+    
+    Returns:
+        Summary with counts for each status
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        summary = status_repo.get_status_summary()
+        
+        return {
+            "success": True,
+            **summary
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get status summary: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes-not-generated")
+async def get_wprm_recipes_not_generated(limit: int = None, offset: int = 0):
+    """
+    Get WPRM recipes that need content generation
+    
+    Includes recipes with status 'not_generated' or 'declined'
+    
+    Args:
+        limit: Maximum number of recipes (default: None = all recipes)
+        offset: Number to skip (default: 0)
+    
+    Returns:
+        List of recipes needing content generation with full recipe data
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        wprm_repo = WPRMRecipeRepository()
+        
+        # Get recipes needing generation (use large limit if None)
+        actual_limit = limit if limit is not None else 10000
+        statuses = status_repo.get_not_generated_recipes(actual_limit, offset)
+        
+        # Get full recipe data
+        recipes = []
+        for status_obj in statuses:
+            recipe = wprm_repo.get_recipe_by_id(status_obj.recipe_id)
+            if recipe:
+                recipe['content_status'] = {
+                    'status': status_obj.status,
+                    'content_generated': status_obj.content_generated,
+                    'posted': status_obj.posted,
+                    'retry_count': status_obj.retry_count,
+                    'last_error': status_obj.last_error
+                }
+                recipes.append(recipe)
+        
+        return {
+            "success": True,
+            "total_needing_generation": len(statuses),
+            "limit": limit,
+            "offset": offset,
+            "recipes": recipes
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get recipes not generated: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes-generated-not-posted")
+async def get_wprm_recipes_generated_not_posted(limit: int = None, offset: int = 0):
+    """
+    Get WPRM recipes with generated content that haven't been posted (status: generated)
+    
+    These recipes need approval before posting.
+    
+    Args:
+        limit: Maximum number of recipes (default: None = all recipes)
+        offset: Number to skip (default: 0)
+    
+    Returns:
+        List of recipes with generated content waiting for approval
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        wprm_repo = WPRMRecipeRepository()
+        
+        # Get recipes with generated content (use large limit if None)
+        actual_limit = limit if limit is not None else 10000
+        statuses = status_repo.get_generated_not_posted_recipes(actual_limit, offset)
+        
+        # Get full recipe data with generated content
+        recipes = []
+        for status_obj in statuses:
+            recipe = wprm_repo.get_recipe_by_id(status_obj.recipe_id)
+            if recipe:
+                recipe['content_status'] = {
+                    'status': status_obj.status,
+                    'content_generated': status_obj.content_generated,
+                    'posted': status_obj.posted,
+                    'generation_date': str(status_obj.generation_date) if status_obj.generation_date else None
+                }
+                recipe['generated_content'] = status_repo.get_generated_content(status_obj.recipe_id)
+                recipes.append(recipe)
+        
+        return {
+            "success": True,
+            "total_awaiting_approval": len(statuses),
+            "limit": limit,
+            "offset": offset,
+            "recipes": recipes
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get generated not posted recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipes-pending")
+async def get_wprm_recipes_pending(limit: int = None, offset: int = 0):
+    """
+    Get WPRM recipes with pending status (approved and waiting to be posted)
+    
+    These recipes are approved and ready to post to social media.
+    
+    Args:
+        limit: Maximum number of recipes (default: None = all recipes)
+        offset: Number to skip (default: 0)
+    
+    Returns:
+        List of recipes ready to post
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        wprm_repo = WPRMRecipeRepository()
+        
+        # Get pending recipes
+        actual_limit = limit if limit is not None else 10000
+        statuses = status_repo.get_pending_recipes(actual_limit, offset)
+        
+        # Get full recipe data with generated content
+        recipes = []
+        for status_obj in statuses:
+            recipe = wprm_repo.get_recipe_by_id(status_obj.recipe_id)
+            if recipe:
+                recipe['content_status'] = {
+                    'status': status_obj.status,
+                    'content_generated': status_obj.content_generated,
+                    'posted': status_obj.posted,
+                    'generation_date': str(status_obj.generation_date) if status_obj.generation_date else None
+                }
+                recipe['generated_content'] = status_repo.get_generated_content(status_obj.recipe_id)
+                recipes.append(recipe)
+        
+        return {
+            "success": True,
+            "total_pending": len(statuses),
+            "limit": limit,
+            "offset": offset,
+            "recipes": recipes
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get pending recipes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/wprm-approve-content/{recipe_id}")
+async def approve_wprm_content(recipe_id: int):
+    """
+    Approve generated content and mark as pending (ready to post)
+    
+    Args:
+        recipe_id: Recipe post ID
+    
+    Returns:
+        Updated recipe status
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        
+        # Check if content is generated
+        status_obj = status_repo.get_status_by_recipe_id(recipe_id)
+        if not status_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Recipe {recipe_id} not found in tracking"
+            )
+        
+        if status_obj.status != 'generated':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Recipe {recipe_id} is not in 'generated' status. Current status: {status_obj.status}"
+            )
+        
+        # Mark as pending
+        status_repo.mark_as_pending(recipe_id)
+        
+        return {
+            "success": True,
+            "message": f"Recipe {recipe_id} approved and marked as pending",
+            "recipe_id": recipe_id,
+            "new_status": "pending"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to approve content for recipe {recipe_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/wprm-decline-content/{recipe_id}")
+async def decline_wprm_content(recipe_id: int, reason: str = None):
+    """
+    Decline generated content (will be regenerated later)
+    
+    Args:
+        recipe_id: Recipe post ID
+        reason: Optional reason for declining
+    
+    Returns:
+        Updated recipe status
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        
+        # Mark as declined
+        status_repo.mark_as_declined(recipe_id, reason)
+        
+        return {
+            "success": True,
+            "message": f"Recipe {recipe_id} content declined",
+            "recipe_id": recipe_id,
+            "new_status": "declined",
+            "reason": reason
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to decline content for recipe {recipe_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/wprm-reset-empty-content")
+async def reset_empty_wprm_content():
+    """
+    Reset all recipes with empty/bad generated content back to not_generated status
+    
+    This will find all recipes marked as 'generated' but have empty content,
+    and reset them so they can be regenerated properly.
+    
+    Returns:
+        Count of recipes reset
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        
+        # Get all generated recipes
+        generated_recipes = status_repo.get_generated_not_posted_recipes(limit=10000, offset=0)
+        
+        reset_count = 0
+        for status_obj in generated_recipes:
+            # Check if content is empty or invalid
+            if status_obj.generated_content:
+                content = json.loads(status_obj.generated_content) if isinstance(status_obj.generated_content, str) else status_obj.generated_content
+                
+                # Check if all platforms have empty content
+                is_empty = True
+                for platform, platform_content in content.items():
+                    if isinstance(platform_content, dict):
+                        # Check for actual content (not just empty strings)
+                        if platform_content.get('content') or platform_content.get('caption') or platform_content.get('post') or platform_content.get('tweet'):
+                            is_empty = False
+                            break
+                
+                if is_empty:
+                    # Reset to not_generated
+                    status_repo.reset_to_not_generated(status_obj.recipe_id)
+                    reset_count += 1
+                    logger.info(f"Reset recipe {status_obj.recipe_id} with empty content")
+            else:
+                # No content at all, reset
+                status_repo.reset_to_not_generated(status_obj.recipe_id)
+                reset_count += 1
+                logger.info(f"Reset recipe {status_obj.recipe_id} with no content")
+        
+        return {
+            "success": True,
+            "message": f"Reset {reset_count} recipes with empty content",
+            "recipes_reset": reset_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to reset empty content: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/wprm-recipe-status/{recipe_id}")
+async def get_wprm_recipe_status(recipe_id: int):
+    """
+    Get content status for a specific WPRM recipe
+    
+    Args:
+        recipe_id: Recipe post ID
+    
+    Returns:
+        Recipe with content status
+    """
+    try:
+        status_repo = WPRMContentStatusRepository()
+        wprm_repo = WPRMRecipeRepository()
+        
+        # Get recipe
+        recipe = wprm_repo.get_recipe_by_id(recipe_id)
+        if not recipe:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Recipe {recipe_id} not found"
+            )
+        
+        # Get status
+        status_obj = status_repo.get_status_by_recipe_id(recipe_id)
+        
+        if status_obj:
+            recipe['content_status'] = {
+                'status': status_obj.status,
+                'content_generated': status_obj.content_generated,
+                'posted': status_obj.posted,
+                'generation_date': str(status_obj.generation_date) if status_obj.generation_date else None,
+                'post_date': str(status_obj.post_date) if status_obj.post_date else None,
+                'platforms_posted': status_obj.platforms_posted.split(',') if status_obj.platforms_posted else [],
+                'retry_count': status_obj.retry_count,
+                'last_error': status_obj.last_error,
+                'notes': status_obj.notes
+            }
+            recipe['generated_content'] = status_repo.get_generated_content(recipe_id)
+        else:
+            recipe['content_status'] = {
+                'status': 'not_tracked',
+                'message': 'Run migration script to track this recipe'
+            }
+        
+        return {
+            "success": True,
+            "recipe": recipe
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get recipe status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

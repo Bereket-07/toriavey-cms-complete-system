@@ -1,4 +1,4 @@
-from sqlalchemy import TIMESTAMP, BigInteger, Column, DateTime, Integer, String, Text, func
+from sqlalchemy import TIMESTAMP, BigInteger, Boolean, Column, DateTime, Integer, String, Text, func
 from src.infrastructure.repository.db_config import Base
 from src.utils.config import settings
 
@@ -32,6 +32,9 @@ class Recipe(Base):
     published = Column(DateTime, nullable=False)
     updated = Column(DateTime, nullable=False)
     modified = Column(TIMESTAMP, nullable=False, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+    
+    # Content generation tracking
+    content_generated = Column(Boolean, nullable=False, default=False, server_default='0')
 
     def __repr__(self):
         return f"<Recipe id={self.id} title='{self.title[:30]}...'>"
