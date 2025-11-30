@@ -1,10 +1,16 @@
 # src/use_cases/manage_content.py
 
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from src.domain.schemas.content_schemas import ContentPlatform
+from src.infrastructure.apis.instagram_api import InstagramAPI
+from src.infrastructure.apis.twitter_api import TwitterAPI
+from src.infrastructure.apis.facebook_api import FacebookAPI
+from src.infrastructure.apis.composio import ComposioAuthRequired, ComposioApiKeyRequired
+from src.services.image_processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +28,16 @@ class ManageContentUseCase:
             entity_id: Composio entity ID for the user
         """
         self.entity_id = entity_id
-        # TODO: Initialize social media APIs (Instagram, Twitter, etc.)
+        
+        # Initialize social media APIs
+        self.instagram_api = InstagramAPI(entity_id=entity_id)
+        self.twitter_api = TwitterAPI(entity_id=entity_id)
+        self.facebook_api = FacebookAPI(entity_id=entity_id)
+        
+        # Initialize image processor
+        self.image_processor = ImageProcessor()
+        
+        logger.info(f"ManageContentUseCase initialized for entity: {entity_id}")
     
     async def approve_content(
         self,
@@ -149,12 +164,30 @@ class ManageContentUseCase:
                 "platforms": [p.value for p in platforms]
             }
         
+        # Check which platforms have already been posted to
+        posted_platforms = content_data.get("posted_platforms", [])
+        platform_post_data = content_data.get("platform_post_data", {})
+        
         results = {
             "posted_platforms": [],
-            "failed_platforms": []
+            "failed_platforms": [],
+            "skipped_platforms": [],
+            "platform_post_data": platform_post_data.copy() if isinstance(platform_post_data, dict) else {}
         }
         
         for platform in platforms:
+            platform_name = platform.value.lower()
+            
+            # Skip if already posted to this platform
+            if platform_name in posted_platforms:
+                logger.info(f"Skipping {platform_name} - already posted")
+                results["skipped_platforms"].append({
+                    "platform": platform_name,
+                    "reason": "Already posted to this platform",
+                    "posted_at": platform_post_data.get(platform_name, {}).get("posted_at")
+                })
+                continue
+            
             try:
                 result = await self._post_to_platform(
                     platform=platform,
@@ -162,13 +195,27 @@ class ManageContentUseCase:
                 )
                 
                 if result.get("success"):
-                    results["posted_platforms"].append(platform.value)
-                else:
-                    results["failed_platforms"].append({
-                        "platform": platform.value,
-                        "error": result.get("error", "Unknown error")
-                    })
+                    results["posted_platforms"].append(platform_name)
                     
+                    # Store platform-specific post data
+                    results["platform_post_data"][platform_name] = {
+                        "post_id": result.get("post_id"),
+                        "post_url": result.get("post_url"),
+                        "posted_at": datetime.utcnow().isoformat()
+                    }
+                else:
+                    error_data = {
+                        "platform": platform_name,
+                        "error": result.get("error", "Unknown error")
+                    }
+                    if result.get("auth_url"):
+                        error_data["auth_url"] = result.get("auth_url")
+                    
+                    results["failed_platforms"].append(error_data)
+                    
+            except ComposioAuthRequired:
+                # Re-raise auth required exception so controller can handle it
+                raise
             except Exception as e:
                 logger.error(f"Failed to post to {platform.value}: {e}")
                 results["failed_platforms"].append({
@@ -239,24 +286,118 @@ class ManageContentUseCase:
         caption: str,
         image_url: Optional[str]
     ) -> Dict[str, Any]:
-        """Post to Instagram - Placeholder for future implementation"""
-        logger.warning("Instagram posting not yet implemented")
-        return {
-            "success": False,
-            "error": "Instagram API integration pending"
-        }
+        """
+        Post to Instagram using Composio OAuth2 integration.
+        
+        Args:
+            caption: Post caption with hashtags
+            image_url: URL of the media to post
+            
+        Returns:
+            Dict with success status, post_id, and error if any
+        """
+        try:
+            if not image_url:
+                logger.error("Instagram requires media URL")
+                return {
+                    "success": False,
+                    "error": "Instagram requires an image or video URL"
+                }
+            
+            # Detect media type
+            media_type = self._get_media_type(image_url)
+            
+            # Log image processing info (actual processing requires image storage)
+            ratio = self.image_processor.get_platform_ratio("instagram", "square")
+            if ratio:
+                logger.info(f"📐 Instagram optimal ratio: {ratio[0]}:{ratio[1]} (1080x1080px)")
+                logger.info(f"ℹ️  Image processing available but requires storage setup to upload processed images")
+            
+            logger.info(f"Posting to Instagram: media_type={media_type}, caption={caption[:50]}...")
+            
+            # Post based on media type
+            if media_type == "video":
+                result = await self.instagram_api.post_video(
+                    video_url=image_url,
+                    caption=caption
+                )
+            else:  # image or unknown (default to image)
+                result = await self.instagram_api.post_image(
+                    image_url=image_url,
+                    caption=caption
+                )
+            
+            if result.get("successful"):
+                logger.info(f"Successfully posted to Instagram. Post ID: {result.get('post_id')}")
+                return {
+                    "success": True,
+                    "post_id": result.get("post_id"),
+                    "platform": "instagram"
+                }
+            else:
+                logger.error(f"Instagram posting failed: {result.get('error')}")
+                return {
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+                
+
+        except ComposioAuthRequired:
+            # Re-raise auth required exception so controller can handle it
+            raise
+        except Exception as e:
+            logger.error(f"Failed to post to Instagram: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def _post_to_twitter(
         self,
         text: str,
         image_url: Optional[str]
     ) -> Dict[str, Any]:
-        """Post to Twitter/X - Placeholder for future implementation"""
-        logger.warning("Twitter posting not yet implemented")
-        return {
-            "success": False,
-            "error": "Twitter API integration pending"
-        }
+        """
+        Post to Twitter/X using Composio OAuth2 integration.
+        
+        Args:
+            text: Tweet text (will be auto-truncated to 280 chars)
+            image_url: Optional URL of media to attach
+            
+        Returns:
+            Dict with success status, tweet_id, tweet_url, and error if any
+        """
+        try:
+            logger.info(f"Posting to Twitter: text={text[:50]}...")
+            
+            # Post text-only (media not supported via Composio)
+            result = await self.twitter_api.post_tweet(text, truncate=True)
+            
+            if result.get("successful"):
+                logger.info(f"Successfully posted to Twitter. Tweet ID: {result.get('tweet_id')}")
+                return {
+                    "success": True,
+                    "tweet_id": result.get("tweet_id"),
+                    "tweet_url": result.get("tweet_url"),
+                    "platform": "twitter"
+                }
+            else:
+                logger.error(f"Twitter posting failed: {result.get('error')}")
+                return {
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+                
+
+        except ComposioAuthRequired:
+            # Re-raise auth required exception so controller can handle it
+            raise
+        except Exception as e:
+            logger.error(f"Failed to post to Twitter: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def _post_to_threads(
         self,
@@ -275,12 +416,49 @@ class ManageContentUseCase:
         text: str,
         image_url: Optional[str]
     ) -> Dict[str, Any]:
-        """Post to Facebook - Placeholder for future implementation"""
-        logger.warning("Facebook posting not yet implemented")
-        return {
-            "success": False,
-            "error": "Facebook API integration pending"
-        }
+        """
+        Post to Facebook using Composio OAuth integration.
+        
+        Args:
+            text: Post message/text
+            image_url: Optional URL of image to attach
+            
+        Returns:
+            Dict with success status, post_id, and error if any
+        """
+        try:
+            logger.info(f"Posting to Facebook: has_media={bool(image_url)}, text={text[:50]}...")
+            
+            # Use post_to_page for both text and images
+            result = await self.facebook_api.post_to_page(
+                message=text,
+                image_url=image_url
+            )
+            
+            if result.get("successful"):
+                logger.info(f"Successfully posted to Facebook. Post ID: {result.get('post_id')}")
+                return {
+                    "success": True,
+                    "post_id": result.get("post_id"),
+                    "post_url": result.get("post_url"),
+                    "platform": "facebook"
+                }
+            else:
+                logger.error(f"Facebook posting failed: {result.get('error')}")
+                return {
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+                
+        except ComposioAuthRequired:
+            # Re-raise auth required exception so controller can handle it
+            raise
+        except Exception as e:
+            logger.error(f"Failed to post to Facebook: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def _post_to_linkedin(
         self,
@@ -305,6 +483,35 @@ class ManageContentUseCase:
             "success": False,
             "error": "Pinterest API integration pending"
         }
+    
+    def _get_media_type(self, url: str) -> str:
+        """
+        Detect media type from URL extension.
+        
+        Args:
+            url: Media URL
+            
+        Returns:
+            "image", "video", or "unknown"
+        """
+        if not url:
+            return "unknown"
+        
+        # Extract extension from URL (handle query params)
+        url_lower = url.lower().split('?')[0]
+        ext = url_lower.split('.')[-1] if '.' in url_lower else ""
+        
+        # Image extensions
+        if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']:
+            return "image"
+        
+        # Video extensions
+        if ext in ['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'm4v', 'wmv']:
+            return "video"
+        
+        # Default to image if unknown
+        logger.warning(f"Unknown media type for extension '{ext}', defaulting to image")
+        return "image"
     
     async def bulk_approve(
         self,

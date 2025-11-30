@@ -100,6 +100,10 @@ class PostContentRequest(BaseModel):
         description="Schedule post for future time (ISO format)"
     )
     posted_by: Optional[int] = Field(default=None, description="User ID who posted")
+    content_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Content data to post (caption, image_url, etc.)"
+    )
 
 
 class RegenerateContentRequest(BaseModel):
@@ -176,6 +180,8 @@ class GeneratedContentResponse(BaseModel):
     edit_count: int
     last_edited_at: Optional[datetime]
     llm_model: Optional[str]
+    posted_platforms: Optional[List[str]] = []
+    platform_post_data: Optional[Dict[str, Any]] = {}
     created_at: datetime
     updated_at: datetime
 
@@ -231,7 +237,7 @@ class PostContentResponse(BaseModel):
     message: str
     content_id: int
     posted_platforms: List[str]
-    failed_platforms: List[Dict[str, str]]
+    failed_platforms: List[Dict[str, Any]]
     scheduled_for: Optional[datetime]
 
 

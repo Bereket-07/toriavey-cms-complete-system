@@ -8,6 +8,7 @@ from src.controllers.clips_controller import router as clips_router
 from src.controllers.content_controller import router as content_router
 from src.controllers.opus_clip_controller import router as opus_router
 from src.controllers.wprm_scheduler_controller import router as wprm_scheduler_router
+from src.controllers.social_media_test_controller import router as social_test_router
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +73,7 @@ app.include_router(clips_router)
 app.include_router(content_router)
 app.include_router(opus_router)
 app.include_router(wprm_scheduler_router)
+app.include_router(social_test_router)  # Social media testing endpoints
 
 # Root endpoint
 @app.get("/")
@@ -86,7 +88,8 @@ async def root():
             "clips": "/api/clips",
             "content": "/api/content (WPRM Recipes)",
             "opus": "/api/opus",
-            "scheduler": "/api/wprm-scheduler (WPRM Content Scheduler)"
+            "scheduler": "/api/wprm-scheduler (WPRM Content Scheduler)",
+            "test": "/api/test (Social Media Testing)"
         }
     }
 
@@ -110,6 +113,7 @@ async def startup_event():
     logger.info("🍳 WPRM Content Management API ready at /api/content")
     logger.info("🎥 OpusClip API ready at /api/opus")
     logger.info("📅 WPRM Content Scheduler API ready at /api/wprm-scheduler")
+    logger.info("🧪 Social Media Testing API ready at /api/test")
 
 # Shutdown event
 @app.on_event("shutdown")

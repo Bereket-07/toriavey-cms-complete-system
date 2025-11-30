@@ -32,6 +32,7 @@ from src.infrastructure.repository.recipe_repo import RecipeRepository
 from src.infrastructure.repository.wprm_recipe_repo import WPRMRecipeRepository
 from src.infrastructure.repository.wprm_content_status_repo import WPRMContentStatusRepository
 from src.domain.models.wprm_content_status_model import ContentStatus
+from src.infrastructure.apis.composio import ComposioAuthRequired
 
 logger = logging.getLogger(__name__)
 
@@ -564,13 +565,18 @@ async def post_content_to_social_media(request: PostContentRequest):
         
         use_case = ManageContentUseCase(entity_id=entity_id)
         
-        # TODO: Fetch content data from database and verify it's approved
-        content_data = {
-            "id": request.content_id,
-            "caption": "Sample caption",
-            "hashtags": "#food #recipe",
-            "image_url": "https://example.com/image.jpg"
-        }
+        # Use content data from request if provided, otherwise fetch from DB (TODO)
+        # For now, we trust the frontend to send the correct content data
+        if hasattr(request, 'content_data') and request.content_data:
+            content_data = request.content_data
+        else:
+            # Fallback (should not happen with current frontend)
+            content_data = {
+                "id": request.content_id,
+                "caption": "Content from CMS",
+                "hashtags": "",
+                "image_url": None
+            }
         
         # Use content's target platform if platforms not specified
         platforms = request.platforms or []  # TODO: Get from content
@@ -581,6 +587,47 @@ async def post_content_to_social_media(request: PostContentRequest):
             schedule_for=request.schedule_for
         )
         
+        # Update WPRM status if successful (for WPRM recipes)
+        if results.get("posted_platforms"):
+            try:
+                # We assume content_id is recipe_id for WPRM flow
+                status_repo = WPRMContentStatusRepository()
+                status_obj = status_repo.get_status_by_recipe_id(request.content_id)
+                
+                if status_obj:
+                    current_platforms = status_obj.platforms_posted.split(',') if status_obj.platforms_posted else []
+                    new_platforms = results.get("posted_platforms", [])
+                    
+                    # Combine and deduplicate
+                    all_platforms = list(set(current_platforms + new_platforms))
+                    
+                    # Check if all generated platforms are posted
+                    generated_content = json.loads(status_obj.generated_content) if status_obj.generated_content else {}
+                    # Filter out non-platform keys if any (though usually it's just platform keys)
+                    # We assume keys in generated_content are the platforms
+                    target_platforms = [k for k in generated_content.keys() if k in [p.value for p in ContentPlatform]]
+                    
+                    # If target_platforms is empty (e.g. old data), assume fully posted if at least one posted
+                    if not target_platforms:
+                        is_fully_posted = True
+                    else:
+                        is_fully_posted = all(p in all_platforms for p in target_platforms)
+                    
+                    if is_fully_posted:
+                        # Mark as fully posted (removes from pending list)
+                        status_repo.mark_as_posted(request.content_id, all_platforms)
+                        logger.info(f"Recipe {request.content_id} fully posted to {all_platforms}")
+                    else:
+                        # Update platforms but keep pending
+                        status_repo.create_or_update_status(
+                            recipe_id=request.content_id,
+                            platforms_posted=",".join(all_platforms)
+                        )
+                        logger.info(f"Recipe {request.content_id} partially posted to {all_platforms}")
+            except Exception as e:
+                logger.error(f"Failed to update WPRM status after posting: {e}")
+                # Continue without failing the request
+        
         return PostContentResponse(
             success=len(results.get("posted_platforms", [])) > 0,
             message=f"Posted to {len(results.get('posted_platforms', []))} platform(s)",
@@ -590,6 +637,24 @@ async def post_content_to_social_media(request: PostContentRequest):
             scheduled_for=request.schedule_for
         )
         
+    except ComposioAuthRequired as e:
+        logger.warning(f"Authentication required for {e.app_name}: {e.auth_url}")
+        # Return a 200 OK with failed_platforms containing the auth URL
+        # This allows the frontend to handle it gracefully without a 401 error page
+        response = PostContentResponse(
+            success=False,
+            message=f"Authentication required for {e.app_name}",
+            content_id=request.content_id,
+            posted_platforms=[],
+            failed_platforms=[{
+                "platform": e.app_name,
+                "error": "Authentication required",
+                "auth_url": e.auth_url
+            }],
+            scheduled_for=request.schedule_for
+        )
+        logger.info(f"Returning auth required response: {response.model_dump()}")
+        return response
     except Exception as e:
         logger.error(f"Failed to post content: {e}")
         raise HTTPException(
@@ -1064,7 +1129,7 @@ def get_wprm_recipes_generated_not_posted(limit: int = None, offset: int = 0):
                     'posted': status_obj.posted,
                     'generation_date': str(status_obj.generation_date) if status_obj.generation_date else None
                 }
-                recipe['generated_content'] = status_repo.get_generated_content(status_obj.recipe_id)
+                recipe['generated_content'] = json.loads(status_obj.generated_content) if status_obj.generated_content else None
                 recipes.append(recipe)
         
         return {
@@ -1123,8 +1188,9 @@ def get_wprm_recipes_pending(limit: int = None, offset: int = 0):
                     'posted': status_obj.posted,
                     'generation_date': str(status_obj.generation_date) if status_obj.generation_date else None
                 }
-                recipe['generated_content'] = status_repo.get_generated_content(status_obj.recipe_id)
+                recipe['generated_content'] = json.loads(status_obj.generated_content) if status_obj.generated_content else None
                 recipe['approved_at'] = str(status_obj.updated_at) if status_obj.updated_at else None  # When it was approved
+                recipe['posted_platforms'] = status_obj.platforms_posted.split(',') if status_obj.platforms_posted else []
                 recipes.append(recipe)
         
         return {

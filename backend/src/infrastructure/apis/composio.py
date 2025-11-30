@@ -41,34 +41,36 @@ class ComposioExecutorService:
     async def check_and_handle_authentication(
         self,
         app_name: str,
-        api_key_params: Optional[Dict[str, Any]] = None
+        api_key_params: Optional[Dict[str, Any]] = None,
+        force_new_connection: bool = False
     ) -> bool:
-        logger.info(f"Checking authentication for app '{app_name}' for entity '{self.entity_id}'")
+        logger.info(f"Checking authentication for app '{app_name}' for entity '{self.entity_id}' (force={force_new_connection})")
 
-        connected_accounts: List[Any] = await asyncio.to_thread(self.toolset.get_connected_accounts)
-        
-        # --- THE FINAL FIX: A more robust check for the connected account ---
-        is_connected = False
-        for acc in connected_accounts:
-            if hasattr(acc, 'appName') and isinstance(acc.appName, str) and acc.appName.upper() == app_name.upper():
-                is_connected = True
-                break
-            if hasattr(acc, 'app') and hasattr(acc.app, 'value') and acc.app.value.upper() == app_name.upper():
-                is_connected = True
-                break
-        
-        if is_connected:
-            logger.info(f"App '{app_name}' is already authenticated.")
-            return True
-        # --- END OF THE FIX ---
+        if not force_new_connection:
+            connected_accounts: List[Any] = await asyncio.to_thread(self.toolset.get_connected_accounts)
+            
+            # --- THE FINAL FIX: A more robust check for the connected account ---
+            is_connected = False
+            for acc in connected_accounts:
+                if hasattr(acc, 'appName') and isinstance(acc.appName, str) and acc.appName.upper() == app_name.upper():
+                    is_connected = True
+                    break
+                if hasattr(acc, 'app') and hasattr(acc.app, 'value') and acc.app.value.upper() == app_name.upper():
+                    is_connected = True
+                    break
+            
+            if is_connected:
+                logger.info(f"App '{app_name}' is already authenticated.")
+                return True
+            # --- END OF THE FIX ---
 
-        logger.warning(f"App '{app_name}' is not authenticated. Determining auth method.")
+        logger.warning(f"App '{app_name}' is not authenticated (or forced). Determining auth method.")
         app_enum = getattr(App, app_name.upper(), None)
         if not app_enum:
             raise ValueError(f"App '{app_name}' is not a valid Composio App.")
 
         auth_config_id = self.auth_config_map.get(app_name.upper())
-        print(f"Auth config ID for {app_name}: {auth_config_id}")
+        # print(f"Auth config ID for {app_name}: {auth_config_id}")
         if not auth_config_id:
             logger.error(f"No auth_config_id found for app '{app_name}'. Please create an auth config in the Composio dashboard.")
             raise ValueError(f"Missing auth_config_id for app '{app_name}'. Create an auth config in Composio dashboard first.")
@@ -107,9 +109,6 @@ class ComposioExecutorService:
             else:
                 raise e
     
-    # -----------------------------------------------------------------
-    #  The rest of your methods – **unchanged**
-    # -----------------------------------------------------------------
     async def get_actions_for_app(self, app_name: str) -> List[Action]:
         logger.info(f"Fetching actions for app: {app_name}")
         app_enum = getattr(App, app_name.upper(), None)
@@ -141,6 +140,27 @@ class ComposioExecutorService:
             logger.info(f"Action '{action.name}' executed successfully.")
             return result
         except Exception as e:
+            error_msg = str(e)
+            
+            # Check if this is a "no connection found" error
+            # It can be NoItemsFound or a generic error with the message
+            if "Could not find a connection" in error_msg or "NoItemsFound" in str(type(e).__name__):
+                # Extract app name from action (e.g., TWITTER_CREATION_OF_A_POST -> TWITTER)
+                app_name = action.name.split('_')[0] if '_' in action.name else "UNKNOWN"
+                logger.warning(f"No connection found for {app_name}, triggering authentication")
+                
+                # Trigger authentication check which will raise ComposioAuthRequired
+                try:
+                    # Force new connection check since execute_action failed
+                    await self.check_and_handle_authentication(app_name=app_name, force_new_connection=True)
+                except ComposioAuthRequired:
+                    # Re-raise the auth required exception so the controller can handle it
+                    raise
+                except Exception as auth_error:
+                    logger.error(f"Authentication check failed: {auth_error}")
+                    # If auth check didn't raise ComposioAuthRequired, raise the original error
+                    raise e
+            
             logger.error(f"Execution of action '{action.name}' failed: {e}", exc_info=True)
             raise
 

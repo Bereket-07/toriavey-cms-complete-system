@@ -23,7 +23,13 @@ class WPRMRecipeRepository:
     
     def get_all_recipes(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
         """
-        Get all WPRM recipes (OPTIMIZED with batch queries)
+        Get all WPRM recipes (HIGHLY OPTIMIZED)
+        
+        Optimizations:
+        1. Select specific columns only (Lightweight, no ORM overhead)
+        2. Fetch only required metadata (No ingredients/instructions)
+        3. Skip PHP serialization parsing (Huge CPU saving)
+        4. Batch fetching for everything
         
         Args:
             limit: Maximum number of recipes to return
@@ -33,6 +39,19 @@ class WPRMRecipeRepository:
             Dictionary with total count and recipes
         """
         try:
+            # Keys required for listing and basic display (NO ingredients/instructions)
+            REQUIRED_META_KEYS = [
+                '_thumbnail_id', 'recipe_description',
+                # 'wprm_ingredients', 'wprm_instructions', # SKIPPED for list view
+                'wprm_prep_time', 'wprm_cook_time', 'wprm_total_time',
+                'wprm_servings', 'wprm_servings_unit',
+                'wprm_notes',
+                'wprm_rating_average', 'wprm_rating_count',
+                'wprm_nutrition_calories', 'wprm_nutrition_protein',
+                'wprm_nutrition_carbohydrates', 'wprm_nutrition_fat',
+                'wprm_nutrition_fiber', 'wprm_nutrition_sugar'
+            ]
+
             with self.db as db:
                 # Get total count
                 total_count = db.query(WPRMRecipe).filter(
@@ -40,8 +59,18 @@ class WPRMRecipeRepository:
                     WPRMRecipe.post_status == 'publish'
                 ).count()
                 
-                # Get recipes with pagination
-                recipes = db.query(WPRMRecipe).filter(
+                # Get recipes with pagination - SELECT SPECIFIC COLUMNS ONLY
+                # This avoids loading the full object and huge post_content
+                recipes = db.query(
+                    WPRMRecipe.ID,
+                    WPRMRecipe.post_title,
+                    WPRMRecipe.post_name,
+                    WPRMRecipe.post_excerpt,
+                    WPRMRecipe.post_status,
+                    WPRMRecipe.post_date,
+                    WPRMRecipe.post_modified,
+                    WPRMRecipe.post_author
+                ).filter(
                     WPRMRecipe.post_type == 'wprm_recipe',
                     WPRMRecipe.post_status == 'publish'
                 ).order_by(WPRMRecipe.post_date.desc()).offset(offset).limit(limit).all()
@@ -55,10 +84,11 @@ class WPRMRecipeRepository:
                         "recipes": []
                     }
                 
-                # OPTIMIZATION: Batch load all metadata for all recipes in ONE query
+                # OPTIMIZATION: Batch load ONLY required metadata
                 recipe_ids = [recipe.ID for recipe in recipes]
                 all_metadata = db.query(WPRMPostMeta).filter(
-                    WPRMPostMeta.post_id.in_(recipe_ids)
+                    WPRMPostMeta.post_id.in_(recipe_ids),
+                    WPRMPostMeta.meta_key.in_(REQUIRED_META_KEYS)
                 ).all()
                 
                 # Group metadata by recipe ID
@@ -68,7 +98,7 @@ class WPRMRecipeRepository:
                         metadata_by_recipe[meta.post_id] = {}
                     metadata_by_recipe[meta.post_id][meta.meta_key] = meta.meta_value
                 
-                # OPTIMIZATION: Batch load all thumbnail IDs and get image URLs in ONE query
+                # OPTIMIZATION: Batch load all thumbnail IDs
                 thumbnail_ids = []
                 for recipe_id in recipe_ids:
                     meta_dict = metadata_by_recipe.get(recipe_id, {})
@@ -79,21 +109,59 @@ class WPRMRecipeRepository:
                 # Get all image URLs in one query
                 image_urls = {}
                 if thumbnail_ids:
-                    images = db.query(WPRMRecipe).filter(
+                    # Select specific columns for images too
+                    images = db.query(WPRMRecipe.ID, WPRMRecipe.guid).filter(
                         WPRMRecipe.ID.in_(thumbnail_ids),
                         WPRMRecipe.post_type == 'attachment'
                     ).all()
                     for img in images:
                         image_urls[img.ID] = img.guid
                 
-                # Format recipes using pre-loaded data
+                # Format recipes using lightweight logic
                 formatted_recipes = []
                 for recipe in recipes:
                     meta_dict = metadata_by_recipe.get(recipe.ID, {})
                     thumbnail_id = meta_dict.get('_thumbnail_id')
                     image_url = image_urls.get(int(thumbnail_id)) if thumbnail_id else None
                     
-                    recipe_data = self._format_recipe_data(recipe, meta_dict, image_url)
+                    # Manual formatting to avoid parsing overhead
+                    # We skip ingredients/instructions here
+                    nutrition = {
+                        "calories": meta_dict.get('wprm_nutrition_calories'),
+                        "protein": meta_dict.get('wprm_nutrition_protein'),
+                        "carbohydrates": meta_dict.get('wprm_nutrition_carbohydrates'),
+                        "fat": meta_dict.get('wprm_nutrition_fat'),
+                        "fiber": meta_dict.get('wprm_nutrition_fiber'),
+                        "sugar": meta_dict.get('wprm_nutrition_sugar')
+                    }
+                    
+                    recipe_data = {
+                        "id": recipe.ID,
+                        "title": recipe.post_title,
+                        "slug": recipe.post_name,
+                        "description": meta_dict.get('recipe_description', ''), # Use meta description
+                        "excerpt": recipe.post_excerpt,
+                        "status": recipe.post_status,
+                        "date": str(recipe.post_date),
+                        "modified": str(recipe.post_modified),
+                        "author_id": recipe.post_author,
+                        "image_url": image_url,
+                        "thumbnail_id": thumbnail_id,
+                        
+                        # Empty lists for heavy fields
+                        "ingredients": [],
+                        "instructions": [],
+                        
+                        "prep_time": meta_dict.get('wprm_prep_time'),
+                        "cook_time": meta_dict.get('wprm_cook_time'),
+                        "total_time": meta_dict.get('wprm_total_time'),
+                        "servings": meta_dict.get('wprm_servings'),
+                        "servings_unit": meta_dict.get('wprm_servings_unit'),
+                        "notes": meta_dict.get('wprm_notes', '').strip(),
+                        "nutrition": nutrition,
+                        "rating": meta_dict.get('wprm_rating_average'),
+                        "rating_count": meta_dict.get('wprm_rating_count'),
+                    }
                     formatted_recipes.append(recipe_data)
                 
                 return {
@@ -136,7 +204,12 @@ class WPRMRecipeRepository:
 
     def get_recipes_by_ids(self, recipe_ids: List[int]) -> List[Dict[str, Any]]:
         """
-        Get multiple recipes by IDs (Optimized batch fetch)
+        Get multiple recipes by IDs (HIGHLY OPTIMIZED)
+        
+        Optimizations:
+        1. Select specific columns only (Lightweight, no ORM overhead)
+        2. Fetch only required metadata (No ingredients/instructions)
+        3. Skip PHP serialization parsing (Huge CPU saving)
         
         Args:
             recipe_ids: List of recipe IDs
@@ -148,9 +221,31 @@ class WPRMRecipeRepository:
             return []
             
         try:
+            # Keys required for listing and basic display (NO ingredients/instructions)
+            REQUIRED_META_KEYS = [
+                '_thumbnail_id', 'recipe_description',
+                # 'wprm_ingredients', 'wprm_instructions', # SKIPPED for list view
+                'wprm_prep_time', 'wprm_cook_time', 'wprm_total_time',
+                'wprm_servings', 'wprm_servings_unit',
+                'wprm_notes',
+                'wprm_rating_average', 'wprm_rating_count',
+                'wprm_nutrition_calories', 'wprm_nutrition_protein',
+                'wprm_nutrition_carbohydrates', 'wprm_nutrition_fat',
+                'wprm_nutrition_fiber', 'wprm_nutrition_sugar'
+            ]
+
             with self.db as db:
-                # Get recipes
-                recipes = db.query(WPRMRecipe).filter(
+                # Get recipes - SELECT SPECIFIC COLUMNS ONLY
+                recipes = db.query(
+                    WPRMRecipe.ID,
+                    WPRMRecipe.post_title,
+                    WPRMRecipe.post_name,
+                    WPRMRecipe.post_excerpt,
+                    WPRMRecipe.post_status,
+                    WPRMRecipe.post_date,
+                    WPRMRecipe.post_modified,
+                    WPRMRecipe.post_author
+                ).filter(
                     WPRMRecipe.ID.in_(recipe_ids),
                     WPRMRecipe.post_type == 'wprm_recipe'
                 ).all()
@@ -158,10 +253,11 @@ class WPRMRecipeRepository:
                 if not recipes:
                     return []
                 
-                # OPTIMIZATION: Batch load all metadata for all recipes in ONE query
+                # OPTIMIZATION: Batch load ONLY required metadata
                 found_ids = [recipe.ID for recipe in recipes]
                 all_metadata = db.query(WPRMPostMeta).filter(
-                    WPRMPostMeta.post_id.in_(found_ids)
+                    WPRMPostMeta.post_id.in_(found_ids),
+                    WPRMPostMeta.meta_key.in_(REQUIRED_META_KEYS)
                 ).all()
                 
                 # Group metadata by recipe ID
@@ -182,21 +278,57 @@ class WPRMRecipeRepository:
                 # Get all image URLs in one query
                 image_urls = {}
                 if thumbnail_ids:
-                    images = db.query(WPRMRecipe).filter(
+                    images = db.query(WPRMRecipe.ID, WPRMRecipe.guid).filter(
                         WPRMRecipe.ID.in_(thumbnail_ids),
                         WPRMRecipe.post_type == 'attachment'
                     ).all()
                     for img in images:
                         image_urls[img.ID] = img.guid
                 
-                # Format recipes
+                # Format recipes using lightweight logic
                 formatted_recipes = []
                 for recipe in recipes:
                     meta_dict = metadata_by_recipe.get(recipe.ID, {})
                     thumbnail_id = meta_dict.get('_thumbnail_id')
                     image_url = image_urls.get(int(thumbnail_id)) if thumbnail_id else None
                     
-                    recipe_data = self._format_recipe_data(recipe, meta_dict, image_url)
+                    # Manual formatting to avoid parsing overhead
+                    nutrition = {
+                        "calories": meta_dict.get('wprm_nutrition_calories'),
+                        "protein": meta_dict.get('wprm_nutrition_protein'),
+                        "carbohydrates": meta_dict.get('wprm_nutrition_carbohydrates'),
+                        "fat": meta_dict.get('wprm_nutrition_fat'),
+                        "fiber": meta_dict.get('wprm_nutrition_fiber'),
+                        "sugar": meta_dict.get('wprm_nutrition_sugar')
+                    }
+                    
+                    recipe_data = {
+                        "id": recipe.ID,
+                        "title": recipe.post_title,
+                        "slug": recipe.post_name,
+                        "description": meta_dict.get('recipe_description', ''),
+                        "excerpt": recipe.post_excerpt,
+                        "status": recipe.post_status,
+                        "date": str(recipe.post_date),
+                        "modified": str(recipe.post_modified),
+                        "author_id": recipe.post_author,
+                        "image_url": image_url,
+                        "thumbnail_id": thumbnail_id,
+                        
+                        # Empty lists for heavy fields
+                        "ingredients": [],
+                        "instructions": [],
+                        
+                        "prep_time": meta_dict.get('wprm_prep_time'),
+                        "cook_time": meta_dict.get('wprm_cook_time'),
+                        "total_time": meta_dict.get('wprm_total_time'),
+                        "servings": meta_dict.get('wprm_servings'),
+                        "servings_unit": meta_dict.get('wprm_servings_unit'),
+                        "notes": meta_dict.get('wprm_notes', '').strip(),
+                        "nutrition": nutrition,
+                        "rating": meta_dict.get('wprm_rating_average'),
+                        "rating_count": meta_dict.get('wprm_rating_count'),
+                    }
                     formatted_recipes.append(recipe_data)
                 
                 return formatted_recipes
