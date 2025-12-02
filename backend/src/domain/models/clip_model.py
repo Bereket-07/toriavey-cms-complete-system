@@ -1,6 +1,6 @@
 # src/domain/models/clip_model.py
 
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, Column, Text
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -34,8 +34,8 @@ class VideoClip(SQLModel, table=True):
     
     # Vizard project info
     vizard_project_id: str = Field(index=True)
-    clip_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    clip_url: Optional[str] = Field(default=None, sa_column=Column(Text))
+    thumbnail_url: Optional[str] = Field(default=None, sa_column=Column(Text))
     
     # Source video info
     source_video_url: str
@@ -118,6 +118,9 @@ class VizardProject(SQLModel, table=True):
     # Source video
     source_video_url: str
     source_platform: str
+    
+    # Target platform
+    target_platform: str = Field(default="unknown")
     
     # Configuration
     language: str = Field(default="en")

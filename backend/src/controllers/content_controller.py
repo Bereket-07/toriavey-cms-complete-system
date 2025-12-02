@@ -33,10 +33,23 @@ from src.infrastructure.repository.wprm_recipe_repo import WPRMRecipeRepository
 from src.infrastructure.repository.wprm_content_status_repo import WPRMContentStatusRepository
 from src.domain.models.wprm_content_status_model import ContentStatus
 from src.infrastructure.apis.composio import ComposioAuthRequired
+from src.services.holiday_service import HolidayService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/content", tags=["Content Management"])
+
+@router.get("/holidays")
+async def get_holidays(days: int = 45):
+    """
+    Get upcoming US and Jewish holidays.
+    """
+    try:
+        service = HolidayService()
+        return service.get_upcoming_holidays(days=days)
+    except Exception as e:
+        logger.error(f"Error fetching holidays: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============= REQUEST/RESPONSE SCHEMAS FOR NEW ENDPOINTS =============

@@ -560,3 +560,40 @@ class VizardAPI:
             keywords=keywords,
             project_name=project_name
         )
+    async def get_project(self, project_id: str) -> Dict[str, Any]:
+        """
+        Get project details and status.
+        
+        Args:
+            project_id: The ID of the project to retrieve
+            
+        Returns:
+            Dict containing project details including status and generated clips
+        """
+        url = f"{self.base_url}/project/query/{project_id}"
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    headers=self._get_headers()
+                )
+                
+                response_data = response.json()
+                
+                if response.status_code != 200:
+                    logger.error(f"Vizard API error: {response.status_code} - {response_data}")
+                    raise VizardAPIError(
+                        message=f"Failed to get project: {response_data.get('message', 'Unknown error')}",
+                        status_code=response.status_code,
+                        response_data=response_data
+                    )
+                
+                return response_data
+                
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error occurred: {e}")
+            raise VizardAPIError(f"HTTP error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            raise VizardAPIError(f"Unexpected error: {str(e)}")

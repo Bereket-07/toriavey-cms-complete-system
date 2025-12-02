@@ -196,45 +196,43 @@ class WPRMContentStatusRepository:
             raise
     
     def get_status_summary(self) -> Dict[str, Any]:
-        """Get summary of content status"""
+        """
+        Get summary of content status
+        OPTIMIZED: Uses single GROUP BY query instead of multiple count queries
+        """
         try:
+            from sqlalchemy import func
+            
             with self.db as db:
-                total = db.query(WPRMContentStatus).count()
+                # Get counts by status in one query
+                results = db.query(
+                    WPRMContentStatus.status,
+                    func.count(WPRMContentStatus.id)
+                ).group_by(WPRMContentStatus.status).all()
                 
-                not_generated = db.query(WPRMContentStatus).filter(
-                    or_(
-                        WPRMContentStatus.status == 'not_generated',
-                        WPRMContentStatus.status == 'declined'
-                    )
-                ).count()
+                # Convert to dictionary for easy lookup
+                counts = {status: count for status, count in results}
                 
-                generated = db.query(WPRMContentStatus).filter(
-                    WPRMContentStatus.status == 'generated'
-                ).count()
+                # Calculate derived counts
+                not_generated = counts.get('not_generated', 0) + counts.get('declined', 0)
+                generated = counts.get('generated', 0)
+                pending = counts.get('pending', 0)
+                posted = counts.get('posted', 0)
+                failed = counts.get('failed', 0)
                 
-                pending = db.query(WPRMContentStatus).filter(
-                    WPRMContentStatus.status == 'pending'
-                ).count()
-                
-                posted = db.query(WPRMContentStatus).filter(
-                    WPRMContentStatus.status == 'posted'
-                ).count()
-                
-                failed = db.query(WPRMContentStatus).filter(
-                    WPRMContentStatus.status == 'failed'
-                ).count()
+                total = sum(counts.values())
                 
                 return {
                     "total_recipes": total,
                     "content_generated": generated + pending + posted,
                     "pending_generation": not_generated,
-                    "completion_percentage": round((posted / total * 100) if total > 0 else 0, 2),
+                    "completion_percentage": round(((generated + pending + posted) / total * 100) if total > 0 else 0, 2),
                     "by_status": {
                         "not_generated": not_generated,
                         "generated": generated,
                         "pending": pending,
                         "posted": posted,
-                        "declined": 0,  # Declined is counted in not_generated
+                        "declined": counts.get('declined', 0),
                         "failed": failed
                     }
                 }

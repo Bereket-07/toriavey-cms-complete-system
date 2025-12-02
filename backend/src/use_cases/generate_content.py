@@ -16,6 +16,7 @@ from src.domain.schemas.content_schemas import (
     GeneratedContentData,
     ContentPlatform
 )
+from src.services.holiday_service import HolidayService
 
 logger = logging.getLogger(__name__)
 
@@ -48,46 +49,43 @@ Servings: {servings}
 - Tone: {tone}
 - Include Emojis: {include_emojis}
 - Max Hashtags: {max_hashtags}
+- Max Hashtags: {max_hashtags}
 - Custom Instructions: {custom_instructions}
 
-**PLATFORM-SPECIFIC GUIDELINES:**
+**UPCOMING HOLIDAYS (US & JEWISH):**
+{upcoming_holidays}
+
+**PLATFORM-SPECIFIC GUIDELINES (2025 BEST PRACTICES):**
 
 **Instagram:**
-- Caption: 150-300 characters, engaging hook in first line
-- Focus on visual appeal and storytelling
-- Use 5-10 relevant hashtags
-- Include call-to-action (save, share, try)
-- Emojis to break up text
+- Caption: Hook in first sentence (bold statement/value). Use line breaks for readability.
+- CTA: Clear call-to-action at the end (Save, Share, Comment).
+- Hashtags: 9-15 mixed size tags (3-5 broad, 4-6 medium, 3-5 niche).
+- Tone: Visual storytelling, authentic.
 
 **Twitter/X:**
-- Keep under 280 characters
-- Punchy, attention-grabbing
-- 2-3 hashtags max
-- Include question or CTA to drive engagement
-
-**Threads:**
-- Conversational tone, 1-3 short paragraphs
-- Can be slightly longer than Twitter
-- 3-5 hashtags
-- Encourage discussion
+- Caption: Short, punchy, strong opinion or value.
+- Keywords: Use real keywords naturally in text instead of hashtags.
+- Hashtags: 0-2 MAX. Only use if highly relevant/trending.
+- CTA: One max (e.g., "Thoughts?").
 
 **Facebook:**
-- Longer, story-driven caption (300-500 chars)
-- Personal touch, relatable
-- 3-5 hashtags
-- Ask questions to drive comments
-
-**LinkedIn:**
-- Professional yet approachable
-- Focus on health benefits, cooking tips, or cultural aspects
-- 2-3 professional hashtags
-- Educational angle
+- Caption: Simple, short, human tone. First 2 lines are critical.
+- Hashtags: 0-1 MAX (Facebook doesn't reward hashtag spam).
+- CTA: Clear action (Save this, Comment below).
+- Avoid "salesy" language; sound like a friend.
 
 **Pinterest:**
-- SEO-focused description
-- Include key ingredients and benefits
-- 5-8 descriptive hashtags
-- Clear recipe type in first line
+- Caption: SEO-focused description. Write like answering a search query.
+- Keywords: Include 3-5 relevant keywords naturally (e.g., "minimalist bedroom ideas").
+- Hashtags: DO NOT USE HASHTAGS (or max 0-2 niche ones). Focus on keywords.
+- CTA: "Save this pin", "Read more".
+
+**LinkedIn:**
+- Professional yet approachable.
+- Focus on health benefits, cooking tips, or cultural aspects.
+- 2-3 professional hashtags.
+- Educational angle.
 
 **OUTPUT FORMAT (JSON):**
 {{
@@ -128,6 +126,7 @@ class GenerateContentUseCase:
     
     def __init__(self):
         self.llm = content_generator_llm
+        self.holiday_service = HolidayService()
     
     async def generate_from_recipe_data(
         self,
@@ -233,6 +232,13 @@ class GenerateContentUseCase:
         ingredients_str = "\n".join([f"- {ing}" for ing in recipe.ingredients[:10]])  # Limit to 10
         instructions_str = "\n".join([f"{i+1}. {inst}" for i, inst in enumerate(recipe.instructions[:5])])  # Limit to 5
         
+        # Get upcoming holidays
+        holidays = self.holiday_service.get_upcoming_holidays(days=45)
+        if holidays:
+            holidays_str = "\n".join([f"- {h['date']}: {h['name']} ({h['type']})" for h in holidays])
+        else:
+            holidays_str = "None in the next 45 days."
+
         # Generate content
         try:
             result = await chain.ainvoke({
@@ -248,7 +254,8 @@ class GenerateContentUseCase:
                 "tone": tone,
                 "include_emojis": "Yes" if include_emojis else "No",
                 "max_hashtags": max_hashtags,
-                "custom_instructions": custom_instructions or "None"
+                "custom_instructions": custom_instructions or "None",
+                "upcoming_holidays": holidays_str
             })
             
             return GeneratedContentData(**result)

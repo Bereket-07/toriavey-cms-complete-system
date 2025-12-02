@@ -39,10 +39,10 @@ class WPRMRecipeRepository:
             Dictionary with total count and recipes
         """
         try:
-            # Keys required for listing and basic display (NO ingredients/instructions)
+            # Keys required for listing and basic display
             REQUIRED_META_KEYS = [
                 '_thumbnail_id', 'recipe_description',
-                # 'wprm_ingredients', 'wprm_instructions', # SKIPPED for list view
+                'wprm_instructions', # Enabled for expandable cards
                 'wprm_prep_time', 'wprm_cook_time', 'wprm_total_time',
                 'wprm_servings', 'wprm_servings_unit',
                 'wprm_notes',
@@ -124,8 +124,11 @@ class WPRMRecipeRepository:
                     thumbnail_id = meta_dict.get('_thumbnail_id')
                     image_url = image_urls.get(int(thumbnail_id)) if thumbnail_id else None
                     
+                    # Parse instructions (lightweight parsing)
+                    instructions = self._parse_wprm_instructions(meta_dict.get('wprm_instructions', ''))
+
                     # Manual formatting to avoid parsing overhead
-                    # We skip ingredients/instructions here
+                    # We skip ingredients here as they are not needed for the list view
                     nutrition = {
                         "calories": meta_dict.get('wprm_nutrition_calories'),
                         "protein": meta_dict.get('wprm_nutrition_protein'),
@@ -150,7 +153,7 @@ class WPRMRecipeRepository:
                         
                         # Empty lists for heavy fields
                         "ingredients": [],
-                        "instructions": [],
+                        "instructions": instructions,
                         
                         "prep_time": meta_dict.get('wprm_prep_time'),
                         "cook_time": meta_dict.get('wprm_cook_time'),

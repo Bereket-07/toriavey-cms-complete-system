@@ -32,6 +32,7 @@ lxml==4.9.3
 
 # Date/Time Utilities
 python-dateutil==2.8.2
+holidays==0.85
 
 # Scheduling
 apscheduler==3.10.4
