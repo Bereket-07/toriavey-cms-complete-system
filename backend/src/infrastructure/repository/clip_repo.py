@@ -78,7 +78,8 @@ class ClipRepository:
                             "videoUrl": c.clip_url,
                             "coverUrl": c.thumbnail_url,
                             "title": c.title,
-                            "videoMsDuration": c.duration * 1000 if c.duration else 0
+                            "videoMsDuration": c.duration * 1000 if c.duration else 0,
+                            "status": c.status
                         } for c in clips
                     ]
                 })
@@ -175,6 +176,29 @@ class ClipRepository:
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to add clips: {e}")
+            raise
+        finally:
+            db.close()
+    def get_clip_by_id(self, clip_id: int) -> Optional[VideoClip]:
+        """Get a video clip by its ID."""
+        db = SessionLocal()
+        try:
+            return db.query(VideoClip).filter(VideoClip.id == clip_id).first()
+        finally:
+            db.close()
+
+    def update_clip_status(self, clip_id: int, status: str):
+        """Update the status of a video clip."""
+        db = SessionLocal()
+        try:
+            clip = db.query(VideoClip).filter(VideoClip.id == clip_id).first()
+            if clip:
+                clip.status = status
+                clip.updated_at = datetime.utcnow()
+                db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update clip status: {e}")
             raise
         finally:
             db.close()

@@ -28,6 +28,7 @@ class TargetPlatform(str, Enum):
     TIKTOK = "tiktok"
     INSTAGRAM_REELS = "instagram_reels"
     FACEBOOK_REELS = "facebook_reels"
+    FACEBOOK = "facebook"
     LINKEDIN = "linkedin"
     TWITTER = "twitter"
 
@@ -69,11 +70,13 @@ class RejectClipRequest(BaseModel):
 
 class PostClipRequest(BaseModel):
     """Request to post a clip to social media"""
-    clip_id: int = Field(..., description="ID of the clip to post")
+    clip_id: str = Field(..., description="ID of the clip to post")
     platforms: List[TargetPlatform] = Field(..., description="Platforms to post to")
     custom_caption: Optional[str] = Field(None, description="Custom caption override")
     custom_hashtags: Optional[str] = Field(None, description="Custom hashtags override")
     schedule_for: Optional[datetime] = Field(None, description="Schedule post for later")
+    clip_url: Optional[str] = Field(None, description="Direct URL to the video file")
+    cover_url: Optional[str] = Field(None, description="URL to the cover image")
 
 
 # ============= RESPONSE SCHEMAS =============

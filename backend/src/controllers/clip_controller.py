@@ -6,6 +6,8 @@ import asyncio
 
 from src.infrastructure.apis.vizard_api import VizardAPI, VideoType
 from src.infrastructure.repository.clip_repo import ClipRepository
+from src.infrastructure.apis.composio import ComposioAuthRequired
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -177,3 +179,106 @@ async def list_projects():
     except Exception as e:
         logger.error(f"Failed to list projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{clip_id}/post")
+async def post_clip(clip_id: int):
+    """
+    Post a specific clip to its target platform.
+    """
+    try:
+        logger.info(f"Attempting to post clip {clip_id}")
+        repo = ClipRepository()
+        clip = repo.get_clip_by_id(clip_id)
+        
+        if not clip:
+            logger.error(f"Clip {clip_id} not found in DB")
+            raise HTTPException(status_code=404, detail="Clip not found")
+            
+        logger.info(f"Found clip {clip_id}, status: {clip.status}, vizard_project_id: {clip.vizard_project_id}")
+
+        if clip.status == "posted":
+            return {"message": "Clip already posted", "post_url": None} 
+            
+        project = repo.get_project_by_vizard_id(clip.vizard_project_id)
+        platform = project.target_platform.lower() if project else "unknown"
+        
+        logger.info(f"Associated project: {project.project_id if project else 'None'}, Platform: {platform}")
+        
+        result = {"successful": False, "error": f"Unknown or unsupported platform: {platform}"}
+        
+        if "youtube" in platform:
+            from src.infrastructure.apis.youtube_api import YouTubeAPI
+            # We need an entity ID. Assuming a default or user-specific one.
+            # For now using a default 'default' or from config if available.
+            # Ideally this comes from the authenticated user context.
+            api = YouTubeAPI(entity_id="default") 
+            result = await api.upload_short(
+                video_file_path=clip.clip_url, # This is a URL, YouTubeAPI expects file path? 
+                # Wait, Composio YouTube upload might expect a URL or we need to download it first.
+                # Let's check YouTubeAPI implementation. It says 'videoFilePath'. 
+                # If Composio supports URL, great. If not, we might need to download to temp.
+                # Re-checking YouTubeAPI... it passes 'videoFilePath' to params. 
+                # Composio often handles URLs if the action supports it. 
+                # Let's assume URL works or we'll need to add a download step.
+                title=clip.title or "New Short",
+                description=clip.description or "",
+                tags=clip.keywords.split(",") if clip.keywords else []
+            )
+            
+        elif "facebook" in platform:
+            from src.infrastructure.apis.facebook_api import FacebookAPI
+            api = FacebookAPI(entity_id="default")
+            result = await api.upload_reel(
+                video_url=clip.clip_url,
+                caption=clip.title or ""
+            )
+            
+        elif "instagram" in platform:
+            from src.infrastructure.apis.instagram_api import InstagramAPI
+            api = InstagramAPI(entity_id="default")
+            # Use post_reel for video clips
+            result = await api.post_reel(
+                video_url=clip.clip_url,
+                caption=clip.title or "",
+                cover_url=clip.thumbnail_url
+            )
+
+        if result.get("successful"):
+            # Update clip status
+            repo.update_clip_status(clip_id, "posted")
+            return result
+        else:
+            raise HTTPException(status_code=500, detail=result.get("error", "Posting failed"))
+
+    except ComposioAuthRequired as auth_err:
+        logger.warning(f"Authentication required for {auth_err.app_name}: {auth_err.auth_url}")
+        return {
+            "successful": False,
+            "error": "Authentication required",
+            "auth_url": auth_err.auth_url,
+            "message": f"Please authenticate {auth_err.app_name} to proceed."
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        # Fallback for when isinstance fails due to reload/import issues
+        if "ComposioAuthRequired" in type(e).__name__:
+             # Try to extract attributes if possible, otherwise just log
+             try:
+                 auth_url = getattr(e, "auth_url", None)
+                 app_name = getattr(e, "app_name", "App")
+                 if auth_url:
+                    logger.warning(f"Authentication required (caught by name check) for {app_name}: {auth_url}")
+                    return {
+                        "successful": False,
+                        "error": "Authentication required",
+                        "auth_url": auth_url,
+                        "message": f"Please authenticate {app_name} to proceed."
+                    }
+             except:
+                 pass
+        
+        logger.error(f"Failed to post clip {clip_id}: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+

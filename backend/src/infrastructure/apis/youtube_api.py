@@ -1,283 +1,195 @@
 # src/infrastructure/apis/youtube_api.py
-
 import logging
-from typing import Dict, Any, List, Optional
-# from composio import Action
-from composio import ComposioToolSet, App, Action
-
-from src.infrastructure.apis.composio import ComposioExecutorService
+import os
+import tempfile
+import requests
+from typing import Dict, Any, Optional
+from composio import Action
+from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
+from src import config
 
 logger = logging.getLogger(__name__)
 
-
 class YouTubeAPI:
     """
-    YouTube API wrapper using Composio for social media integration.
-    Handles video uploads, listing channel videos, and fetching video details.
+    YouTube API wrapper using Composio for video uploads.
+    Uses YOUTUBE_UPLOAD_VIDEO for posting shorts.
     """
 
     def __init__(self, entity_id: str):
-        """
-        Initialize YouTube API with Composio executor.
-        
-        Args:
-            entity_id: The Composio entity ID for the user/account
-        """
+        """Initialize YouTube API with Composio executor."""
         self.entity_id = entity_id
         self.composio_executor = ComposioExecutorService(entity_id=entity_id)
         self.app_name = "YOUTUBE"
+        self.max_description_length = 5000  # YouTube description limit
         logger.info(f"YouTubeAPI initialized for entity: {entity_id}")
 
     async def _ensure_authentication(self) -> None:
-        """
-        Ensure YouTube is authenticated before making API calls.
-        Raises ComposioAuthRequired or ComposioApiKeyRequired if not authenticated.
-        """
+        """Ensure YouTube OAuth authentication."""
         await self.composio_executor.check_and_handle_authentication(
             app_name=self.app_name
         )
 
-    async def upload_video(
+    def _truncate_text(self, text: str, max_length: int = None) -> str:
+        """Truncate text to fit YouTube's description limit."""
+        if max_length is None:
+            max_length = self.max_description_length
+        if len(text) <= max_length:
+            return text
+        return text[:max_length - 3] + "..."
+
+    def _download_video(self, url: str) -> str:
+        """Download video from URL to a temporary file."""
+        try:
+            logger.info(f"Downloading video from {url}...")
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            # Create a temporary file
+            # We try to preserve extension if possible, default to .mp4
+            ext = ".mp4"
+            if "." in url.split("/")[-1]:
+                possible_ext = "." + url.split("/")[-1].split(".")[-1].split("?")[0]
+                if len(possible_ext) <= 5: # Sanity check
+                    ext = possible_ext
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    tmp_file.write(chunk)
+                tmp_path = tmp_file.name
+            
+            logger.info(f"Video downloaded to {tmp_path}")
+            return tmp_path
+        except Exception as e:
+            logger.error(f"Failed to download video: {e}")
+            raise
+
+    async def upload_short(
         self,
         video_file_path: str,
         title: str,
-        description: str,
-        category_id: str,
-        privacy_status: str,
-        tags: List[str]
+        description: str = "",
+        tags: list = None,
+        privacy_status: str = "public",
+        truncate: bool = True
     ) -> Dict[str, Any]:
         """
-        Upload a video to YouTube channel.
+        Upload a short video to YouTube.
         
         Args:
-            video_file_path: Local file path to the video file (must be YouTube-supported format)
+            video_file_path: Path to the video file OR URL
             title: Video title
             description: Video description
-            category_id: YouTube category ID (e.g., "22" for People & Blogs)
-            privacy_status: Privacy status - "public", "private", or "unlisted"
             tags: List of tags for the video
+            privacy_status: Privacy setting ('public', 'private', 'unlisted')
+            truncate: Whether to auto-truncate description
             
         Returns:
-            Dict containing:
-                - data: Video upload response data
-                - successful: Boolean indicating success
-                - error: Error message if any
-                
-        Raises:
-            ComposioAuthRequired: If YouTube authentication is needed
-            Exception: If upload fails
+            Dict with successful, video_id, video_url, error
         """
-        logger.info(f"Uploading video: {title} from {video_file_path}")
+        logger.info(f"Uploading YouTube Short: {title}")
         
-        # Ensure authentication
-        await self._ensure_authentication()
-        
-        # Prepare action parameters
-        params = {
-            "videoFilePath": video_file_path,
-            "title": title,
-            "description": description,
-            "categoryId": category_id,
-            "privacyStatus": privacy_status,
-            "tags": tags
-        }
-        
-        # Get the upload action
-        action = Action.YOUTUBE_UPLOAD_VIDEO
-        
-        # Execute the action
-        result = await self.composio_executor.execute_action(
-            action=action,
-            params=params
-        )
-        
-        logger.info(f"Video upload completed. Success: {result.get('successful', False)}")
-        return result
-
-    async def list_channel_videos(
-        self,
-        channel_id: str,
-        max_results: int = 5,
-        page_token: Optional[str] = None,
-        part: str = "snippet"
-    ) -> Dict[str, Any]:
-        """
-        List videos from a specified YouTube channel.
-        
-        Args:
-            channel_id: The YouTube channel ID
-            max_results: Maximum number of results to return (default: 5)
-            page_token: Token for pagination (optional)
-            part: Resource parts to include (default: "snippet")
+        if tags is None:
+            tags = []
             
-        Returns:
-            Dict containing:
-                - data: List of videos with their details
-                - successful: Boolean indicating success
-                - error: Error message if any
-                
-        Raises:
-            ComposioAuthRequired: If YouTube authentication is needed
-            Exception: If listing fails
-        """
-        logger.info(f"Listing videos for channel: {channel_id}, max_results: {max_results}")
-        
-        # Ensure authentication
-        await self._ensure_authentication()
-        
-        # Prepare action parameters
-        params = {
-            "channelId": channel_id,
-            "maxResults": max_results,
-            "part": part
-        }
-        
-        # Add page_token if provided
-        if page_token:
-            params["pageToken"] = page_token
-        
-        # Get the list action
-        action = Action.YOUTUBE_LIST_CHANNEL_VIDEOS
-        
-        # Execute the action
-        result = await self.composio_executor.execute_action(
-            action=action,
-            params=params
-        )
-        
-        logger.info(f"Channel videos listed. Success: {result.get('successful', False)}")
-        return result
-
-    async def get_video_details_batch(
-        self,
-        video_ids: List[str],
-        parts: List[str],
-        hl: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Retrieve multiple YouTube video resource parts in a single batch call.
-        Use this when you need cohort-level metrics for many videos to reduce quota usage and latency.
-        
-        Args:
-            video_ids: List of YouTube video IDs to fetch details for
-            parts: List of resource parts to retrieve (e.g., ["snippet", "statistics", "contentDetails"])
-            hl: Language code for localized data (optional, e.g., "en", "es")
+        temp_file_path = None
             
-        Returns:
-            Dict containing:
-                - data: Batch video details response
-                - successful: Boolean indicating success
-                - error: Error message if any
-                
-        Raises:
-            ComposioAuthRequired: If YouTube authentication is needed
-            Exception: If batch fetch fails
-        """
-        logger.info(f"Fetching batch video details for {len(video_ids)} videos")
-        
-        # Ensure authentication
-        await self._ensure_authentication()
-        
-        # Prepare action parameters
-        params = {
-            "id": video_ids,
-            "parts": parts
-        }
-        
-        # Add hl if provided
-        if hl:
-            params["hl"] = hl
-        
-        # Get the batch details action
-        action = Action.YOUTUBE_GET_VIDEO_DETAILS_BATCH
-        
-        # Execute the action
-        result = await self.composio_executor.execute_action(
-            action=action,
-            params=params
-        )
-        
-        logger.info(f"Batch video details fetched. Success: {result.get('successful', False)}")
-        return result
-
-    async def get_channel_videos_with_details(
-        self,
-        channel_id: str,
-        max_results: int = 5,
-        detail_parts: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        Convenience method to list channel videos and fetch their detailed information.
-        
-        Args:
-            channel_id: The YouTube channel ID
-            max_results: Maximum number of videos to fetch (default: 5)
-            detail_parts: Parts to fetch for each video (default: ["snippet", "statistics"])
+        try:
+            # Ensure authentication
+            await self._ensure_authentication()
             
-        Returns:
-            Dict containing:
-                - videos: List of videos with full details
-                - successful: Boolean indicating success
-                - error: Error message if any
-        """
-        if detail_parts is None:
-            detail_parts = ["snippet", "statistics"]
-        
-        logger.info(f"Fetching channel videos with details for channel: {channel_id}")
-        
-        # First, list the videos
-        list_result = await self.list_channel_videos(
-            channel_id=channel_id,
-            max_results=max_results
-        )
-        
-        if not list_result.get("successful", False):
-            return list_result
-        
-        # Extract video IDs from the list result
-        videos_data = list_result.get("data", {})
-        items = videos_data.get("items", [])
-        
-        if not items:
-            return {
-                "videos": [],
-                "successful": True,
-                "error": None
+            # Handle URL input by downloading to temp file
+            if video_file_path.startswith("http://") or video_file_path.startswith("https://"):
+                temp_file_path = self._download_video(video_file_path)
+                upload_path = temp_file_path
+            else:
+                upload_path = video_file_path
+            
+            # Truncate description if needed
+            if truncate and description:
+                description = self._truncate_text(description)
+            
+            # Debug: List available actions
+            actions = await self.composio_executor.get_actions_for_app(self.app_name)
+            action_names = [action.name for action in actions]
+            logger.info(f"Available YouTube actions: {action_names}")
+            
+            # Find the upload video action
+            upload_action = None
+            for action in actions:
+                if action.name == "YOUTUBE_UPLOAD_VIDEO":
+                    upload_action = action
+                    break
+            
+            if not upload_action:
+                logger.warning("YOUTUBE_UPLOAD_VIDEO action not found in list, attempting execution anyway...")
+                try:
+                    upload_action = Action.YOUTUBE_UPLOAD_VIDEO
+                except AttributeError:
+                    return {
+                        "successful": False,
+                        "error": "YOUTUBE_UPLOAD_VIDEO not available",
+                        "video_id": None,
+                        "video_url": None
+                    }
+            
+            # Prepare parameters for YouTube Shorts upload
+            # YouTube Shorts are vertical videos with aspect ratio 9:16
+            # and typically less than 60 seconds
+            params = {
+                "title": title,
+                "description": description,
+                "tags": tags,
+                "privacyStatus": privacy_status,
+                "categoryId": "22",  # People & Blogs category
+                "videoFilePath": upload_path
             }
-        
-        # Extract video IDs
-        video_ids = []
-        for item in items:
-            video_id = item.get("id", {}).get("videoId")
-            if video_id:
-                video_ids.append(video_id)
-        
-        if not video_ids:
+            
+            # Execute the upload action
+            logger.info(f"Executing YouTube video upload with params: {params}")
+            result = await self.composio_executor.execute_action(
+                action=upload_action,
+                params=params
+            )
+            
+            if result.get("successful", False):
+                video_id = result.get("data", {}).get("id")
+                video_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
+                
+                logger.info(f"Successfully uploaded YouTube Short: {video_id}")
+                return {
+                    "successful": True,
+                    "video_id": video_id,
+                    "video_url": video_url,
+                    "error": None
+                }
+            else:
+                error_message = result.get("error", "Unknown error during upload")
+                logger.error(f"Failed to upload YouTube Short: {error_message}")
+                return {
+                    "successful": False,
+                    "error": error_message,
+                    "video_id": None,
+                    "video_url": None
+                }
+                
+        except ComposioAuthRequired:
+            raise
+        except Exception as e:
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise e
+            logger.exception(f"Exception during YouTube Short upload: {str(e)}")
             return {
-                "videos": items,
-                "successful": True,
-                "error": None
+                "successful": False,
+                "error": str(e),
+                "video_id": None,
+                "video_url": None
             }
-        
-        # Fetch detailed information for all videos
-        details_result = await self.get_video_details_batch(
-            video_ids=video_ids,
-            parts=detail_parts
-        )
-        
-        if not details_result.get("successful", False):
-            # Return basic info if details fetch fails
-            return {
-                "videos": items,
-                "successful": True,
-                "error": f"Details fetch failed: {details_result.get('error')}"
-            }
-        
-        # Combine the results
-        detailed_videos = details_result.get("data", {}).get("items", [])
-        
-        return {
-            "videos": detailed_videos,
-            "successful": True,
-            "error": None
-        }
+        finally:
+            # Clean up temp file if created
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    logger.info(f"Removed temp file: {temp_file_path}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to remove temp file {temp_file_path}: {cleanup_err}")

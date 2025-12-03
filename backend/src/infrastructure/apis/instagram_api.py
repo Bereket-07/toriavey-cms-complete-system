@@ -1,6 +1,5 @@
-# src/infrastructure/apis/instagram_api.py
-
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 from composio import Action
 
@@ -209,21 +208,244 @@ class InstagramAPI:
                 "post_url": None
             }
 
-    async def post_video(
+    async def post_reel(
         self,
         video_url: str,
         caption: str = "",
+        cover_url: Optional[str] = None,
         ig_user_id: Optional[str] = None,
         truncate: bool = True
     ) -> Dict[str, Any]:
-        """Post a video to Instagram (placeholder)."""
-        logger.warning("Instagram video posting not fully implemented yet")
-        return {
-            "successful": False,
-            "error": "Video posting not yet implemented",
-            "post_id": None,
-            "post_url": None
-        }
+        """
+        Post a Reel to Instagram using two-step process:
+        1. INSTAGRAM_CREATE_MEDIA_CONTAINER with media_type=REELS
+        2. INSTAGRAM_CREATE_POST
+        
+        Args:
+            video_url: URL of the video to post as a Reel
+            caption: Reel caption
+            cover_url: Optional URL for the cover image
+            ig_user_id: Instagram user ID (uses config if not provided)
+            truncate: Whether to auto-truncate caption
+            
+        Returns:
+            Dict with successful, post_id, post_url, error
+        """
+        logger.info(f"Posting Instagram Reel: {caption[:50]}...")
+        
+        # Use provided ig_user_id or fall back to config
+        user_id = ig_user_id or self.ig_user_id
+        
+        if not user_id:
+            logger.error("No ig_user_id provided or configured!")
+            return {
+                "successful": False,
+                "error": "Instagram user ID is required",
+                "post_id": None,
+                "post_url": None
+            }
+        
+        try:
+            # Ensure authentication
+            await self._ensure_authentication()
+            
+            # Truncate caption if needed
+            if truncate and caption:
+                caption = self._truncate_text(caption)
+            
+            # Debug: List available actions
+            actions = await self.composio_executor.get_actions_for_app(self.app_name)
+            action_names = [action.name for action in actions]
+            logger.info(f"Available Instagram actions: {action_names}")
+            
+            # STEP 1: Create media container for Reel
+            logger.info("Creating media container for Reel...")
+            
+            container_action = None
+            for action in actions:
+                if action.name == "INSTAGRAM_CREATE_MEDIA_CONTAINER":
+                    container_action = action
+                    break
+            
+            if not container_action:
+                try:
+                    container_action = Action.INSTAGRAM_CREATE_MEDIA_CONTAINER
+                except AttributeError:
+                    return {
+                        "successful": False,
+                        "error": "INSTAGRAM_CREATE_MEDIA_CONTAINER not available",
+                        "post_id": None,
+                        "post_url": None
+                    }
+
+            # Prepare parameters for Reel container
+            container_params = {
+                "ig_user_id": user_id,
+                "video_url": video_url,
+                "caption": caption,
+                "media_type": "REELS"  # Specify REELS as the media type
+            }
+            
+            # Add cover image if provided
+            if cover_url:
+                container_params["cover_url"] = cover_url
+            
+            # Execute the create media container action
+            container_result = await self.composio_executor.execute_action(
+                action=container_action,
+                params=container_params
+            )
+            
+            if not container_result.get("successful", False):
+                error_msg = container_result.get("error", "Unknown error creating media container")
+                logger.error(f"Failed to create Reel container: {error_msg}")
+                return {
+                    "successful": False,
+                    "error": error_msg,
+                    "post_id": None,
+                    "post_url": None
+                }
+            
+            # Get creation ID from container result
+            creation_id = container_result.get("data", {}).get("id")
+            if not creation_id:
+                logger.error("No creation_id returned from media container creation")
+                return {
+                    "successful": False,
+                    "error": "No creation ID returned",
+                    "post_id": None,
+                    "post_url": None
+                }
+            
+            logger.info(f"Media container created with ID: {creation_id}")
+            
+            # Check container status before publishing
+            # Find status action
+            status_action = None
+            for action in actions:
+                if action.name == "INSTAGRAM_GET_POST_STATUS":
+                    status_action = action
+                    break
+            
+            if not status_action:
+                try:
+                    status_action = Action.INSTAGRAM_GET_POST_STATUS
+                except AttributeError:
+                    logger.warning("INSTAGRAM_GET_POST_STATUS not found, skipping status check (might fail if not ready)")
+            
+            if status_action:
+                status_result = await self.composio_executor.execute_action(
+                    action=status_action,
+                    params={"creation_id": creation_id}
+                )
+                
+                logger.info(f"Initial status check result: {status_result}")
+                
+                # Extract status code safely
+                data = status_result.get("data", {})
+                status = data.get("status_code") or data.get("status") or ""
+                logger.info(f"Container status: {status}")
+                
+                # If status is not FINISHED, wait and check again
+                max_retries = 12 # Increased to 60s total
+                retry_count = 0
+                
+                while status != "FINISHED" and status != "ERROR" and retry_count < max_retries:
+                    logger.info(f"Waiting for container processing... (Attempt {retry_count + 1}/{max_retries})")
+                    await asyncio.sleep(5)  # Wait 5 seconds before checking again
+                    
+                    status_result = await self.composio_executor.execute_action(
+                        action=status_action,
+                        params={"creation_id": creation_id}
+                    )
+                    
+                    data = status_result.get("data", {})
+                    status = data.get("status_code") or data.get("status") or ""
+                    logger.info(f"Updated container status: {status}")
+                    
+                    if status == "ERROR":
+                        logger.error(f"Container processing failed with status ERROR. Details: {status_result}")
+                        return {
+                            "successful": False,
+                            "error": "Instagram media container processing failed",
+                            "post_id": None,
+                            "post_url": None
+                        }
+                        
+                    retry_count += 1
+                
+                if status != "FINISHED":
+                    logger.error(f"Container processing did not complete in time. Status: {status}")
+                    return {
+                        "successful": False,
+                        "error": f"Container processing timeout. Status: {status}",
+                        "post_id": None,
+                        "post_url": None
+                    }
+            
+            # STEP 2: Publish the Reel
+            logger.info("Publishing Reel...")
+            
+            post_action = None
+            for action in actions:
+                if action.name == "INSTAGRAM_CREATE_POST":
+                    post_action = action
+                    break
+            
+            if not post_action:
+                try:
+                    post_action = Action.INSTAGRAM_CREATE_POST
+                except AttributeError:
+                    return {
+                        "successful": False,
+                        "error": "INSTAGRAM_CREATE_POST not available",
+                        "post_id": None,
+                        "post_url": None
+                    }
+
+            publish_params = {
+                "ig_user_id": user_id,
+                "creation_id": creation_id
+            }
+            
+            publish_result = await self.composio_executor.execute_action(
+                action=post_action,
+                params=publish_params
+            )
+            
+            if publish_result.get("successful", False):
+                post_id = publish_result.get("data", {}).get("id")
+                post_url = f"https://www.instagram.com/p/{post_id}/" if post_id else None
+                
+                logger.info(f"Successfully published Reel: {post_id}")
+                return {
+                    "successful": True,
+                    "post_id": post_id,
+                    "post_url": post_url,
+                    "error": None
+                }
+            else:
+                error_msg = publish_result.get("error", "Unknown error during publishing")
+                logger.error(f"Failed to publish Reel: {error_msg}")
+                return {
+                    "successful": False,
+                    "error": error_msg,
+                    "post_id": None,
+                    "post_url": None
+                }
+                
+        except ComposioAuthRequired:
+            raise
+        except Exception as e:
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise e
+            logger.exception(f"Exception during Reel posting: {str(e)}")
+            return {
+                "successful": False,
+                "error": str(e),
+                "post_id": None,
+                "post_url": None
+            }
 
     async def get_available_actions(self) -> Dict[str, Any]:
         """Get all available Instagram actions from Composio."""

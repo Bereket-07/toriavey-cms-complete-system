@@ -5,6 +5,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from src.infrastructure.apis.youtube_api import YouTubeAPI
+from src.infrastructure.apis.instagram_api import InstagramAPI
+from src.infrastructure.apis.facebook_api import FacebookAPI
 from src.domain.schemas.clip_schemas import TargetPlatform
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,8 @@ class ManageClipsUseCase:
         """
         self.entity_id = entity_id
         self.youtube_api = YouTubeAPI(entity_id=entity_id)
+        self.instagram_api = InstagramAPI(entity_id=entity_id)
+        self.facebook_api = FacebookAPI(entity_id=entity_id)
     
     async def approve_clip(
         self,
@@ -122,11 +126,52 @@ class ManageClipsUseCase:
                 description=description,
                 tags=tags
             )
+        elif platform == TargetPlatform.INSTAGRAM_REELS:
+            return await self._post_to_instagram_reels(
+                video_url=clip_data.get("clip_url"),
+                caption=f"{title}\n\n{description}",
+                cover_url=clip_data.get("cover_url")
+            )
+        elif platform == TargetPlatform.FACEBOOK_REELS or platform == TargetPlatform.FACEBOOK:
+            return await self._post_to_facebook_reels(
+                video_url=clip_data.get("clip_url"),
+                caption=f"{title}\n\n{description}",
+                title=title
+            )
         else:
             return {
                 "success": False,
                 "error": f"Platform {platform.value} integration pending"
             }
+
+    async def _post_to_facebook_reels(
+        self,
+        video_url: str,
+        caption: str,
+        title: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Post to Facebook Reels"""
+        try:
+            if not video_url:
+                return {"success": False, "error": "No video URL provided for Facebook Reel"}
+
+            result = await self.facebook_api.upload_reel(
+                video_url=video_url,
+                caption=caption,
+                title=title
+            )
+            
+            return {
+                "success": result.get("successful", False),
+                "platform_post_id": result.get("post_id"),
+                "post_url": result.get("post_url"),
+                "error": result.get("error")
+            }
+        except Exception as e:
+            logger.error(f"Facebook Reel post failed: {e}")
+            if "ComposioAuthRequired" in str(e) or "auth" in str(e).lower():
+                 pass
+            return {"success": False, "error": str(e)}
     
     async def _post_to_youtube_shorts(
         self,
@@ -153,4 +198,35 @@ class ManageClipsUseCase:
             }
         except Exception as e:
             logger.error(f"YouTube upload failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _post_to_instagram_reels(
+        self,
+        video_url: str,
+        caption: str,
+        cover_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Post to Instagram Reels"""
+        try:
+            if not video_url:
+                return {"success": False, "error": "No video URL provided for Instagram Reel"}
+
+            result = await self.instagram_api.post_reel(
+                video_url=video_url,
+                caption=caption,
+                cover_url=cover_url
+            )
+            
+            return {
+                "success": result.get("successful", False),
+                "platform_post_id": result.get("post_id"),
+                "post_url": result.get("post_url"),
+                "error": result.get("error")
+            }
+        except Exception as e:
+            logger.error(f"Instagram Reel post failed: {e}")
+            # Check if it's an auth error to pass it up
+            if "ComposioAuthRequired" in str(e) or "auth" in str(e).lower():
+                 # We might want to re-raise or handle specific auth structure
+                 pass
             return {"success": False, "error": str(e)}

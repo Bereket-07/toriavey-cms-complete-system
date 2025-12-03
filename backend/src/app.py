@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from src.controllers.clip_controller import router as clips_router
+from src.controllers.clips_controller import router as clips_router
 from src.controllers.content_controller import router as content_router
 from src.controllers.opus_clip_controller import router as opus_router
 from src.controllers.wprm_scheduler_controller import router as wprm_scheduler_router
