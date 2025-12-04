@@ -4,9 +4,13 @@ import os
 import tempfile
 import requests
 from typing import Dict, Any, Optional
+import mimetypes
+import hashlib
+import json
 from composio import Action
 from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
 from src import config
+from src.utils.video_processor import prepare_video_for_shorts, get_video_duration
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,8 @@ class YouTubeAPI:
             logger.error(f"Failed to download video: {e}")
             raise
 
+
+
     async def upload_short(
         self,
         video_file_path: str,
@@ -71,7 +77,8 @@ class YouTubeAPI:
         description: str = "",
         tags: list = None,
         privacy_status: str = "public",
-        truncate: bool = True
+        truncate: bool = True,
+        preprocess: bool = True
     ) -> Dict[str, Any]:
         """
         Upload a short video to YouTube.
@@ -83,6 +90,7 @@ class YouTubeAPI:
             tags: List of tags for the video
             privacy_status: Privacy setting ('public', 'private', 'unlisted')
             truncate: Whether to auto-truncate description
+            preprocess: Whether to preprocess the video for Shorts format
             
         Returns:
             Dict with successful, video_id, video_url, error
@@ -90,9 +98,12 @@ class YouTubeAPI:
         logger.info(f"Uploading YouTube Short: {title}")
         
         if tags is None:
-            tags = []
+            tags = ["#Shorts"]
+        elif "#Shorts" not in tags and "Shorts" not in tags:
+            tags.append("#Shorts")
             
         temp_file_path = None
+        processed_file_path = None
             
         try:
             # Ensure authentication
@@ -104,45 +115,75 @@ class YouTubeAPI:
                 upload_path = temp_file_path
             else:
                 upload_path = video_file_path
-            
+
+            # Preprocess the video if requested or if duration > 60s
+            if preprocess:
+                try:
+                    duration = get_video_duration(upload_path)
+                    logger.info(f"Video duration: {duration}s")
+                    
+                    # Always process to ensure correct format (9:16, yuv420p, etc.)
+                    # This is safer than relying on detection which might miss encoding nuances
+                    processed_file_path = prepare_video_for_shorts(upload_path)
+                    if processed_file_path != upload_path:
+                        upload_path = processed_file_path
+                        logger.info(f"Video preprocessed for Shorts format: {processed_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to preprocess video: {str(e)}. Using original video.")
+
             # Truncate description if needed
             if truncate and description:
                 description = self._truncate_text(description)
             
-            # Debug: List available actions
-            actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            action_names = [action.name for action in actions]
-            logger.info(f"Available YouTube actions: {action_names}")
+            # Make sure #Shorts is in the description AND title
+            if "#Shorts" not in description:
+                description = f"{description}\n#Shorts"
+                
+            # Some creators also add #Shorts to the title
+            if "#Shorts" not in title:
+                title = f"{title} #Shorts"
+
+            try:
+                upload_action = Action.YOUTUBE_UPLOAD_VIDEO
+            except AttributeError:
+                return {
+                    "successful": False,
+                    "error": "YOUTUBE_UPLOAD_VIDEO not available",
+                    "video_id": None,
+                    "video_url": None
+                }
             
-            # Find the upload video action
-            upload_action = None
-            for action in actions:
-                if action.name == "YOUTUBE_UPLOAD_VIDEO":
-                    upload_action = action
-                    break
+            # Upload file using ComposioExecutorService
+            logger.info(f"Uploading file {upload_path} to Composio...")
+            with open(upload_path, "rb") as f:
+                file_content = f.read()
             
-            if not upload_action:
-                logger.warning("YOUTUBE_UPLOAD_VIDEO action not found in list, attempting execution anyway...")
-                try:
-                    upload_action = Action.YOUTUBE_UPLOAD_VIDEO
-                except AttributeError:
-                    return {
-                        "successful": False,
-                        "error": "YOUTUBE_UPLOAD_VIDEO not available",
-                        "video_id": None,
-                        "video_url": None
-                    }
+            mime_type, _ = mimetypes.guess_type(upload_path)
+            if not mime_type:
+                mime_type = "video/mp4"
+                
+            upload_data = await self.composio_executor.upload_file(
+                file_name=os.path.basename(upload_path),
+                file_content=file_content,
+                content_type=mime_type
+            )
             
+            file_id = upload_data.get("id")
+            s3_key = upload_data.get("key") or upload_data.get("fileKey") or file_id
+
             # Prepare parameters for YouTube Shorts upload
-            # YouTube Shorts are vertical videos with aspect ratio 9:16
-            # and typically less than 60 seconds
             params = {
                 "title": title,
                 "description": description,
                 "tags": tags,
                 "privacyStatus": privacy_status,
                 "categoryId": "22",  # People & Blogs category
-                "videoFilePath": upload_path
+                "videoFilePath": {
+                    "id": file_id,
+                    "name": os.path.basename(upload_path),
+                    "mimetype": mime_type,
+                    "s3key": s3_key
+                }
             }
             
             # Execute the upload action
@@ -193,3 +234,11 @@ class YouTubeAPI:
                     logger.info(f"Removed temp file: {temp_file_path}")
                 except Exception as cleanup_err:
                     logger.warning(f"Failed to remove temp file {temp_file_path}: {cleanup_err}")
+            
+            # Clean up processed file if created and different from temp file
+            if processed_file_path and os.path.exists(processed_file_path) and processed_file_path != temp_file_path:
+                try:
+                    os.remove(processed_file_path)
+                    logger.info(f"Removed processed file: {processed_file_path}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to remove processed file {processed_file_path}: {cleanup_err}")

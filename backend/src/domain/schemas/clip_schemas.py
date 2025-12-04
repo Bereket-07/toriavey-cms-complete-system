@@ -149,6 +149,8 @@ class PostClipResponse(BaseModel):
     """Response after posting clips"""
     success: bool
     message: str
-    clip_id: int
+    clip_id: str
     posted_platforms: List[str]
     failed_platforms: List[dict]
+    auth_required: bool = False
+    auth_url: Optional[str] = None

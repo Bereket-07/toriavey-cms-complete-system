@@ -97,6 +97,8 @@ class ManageClipsUseCase:
                     })
                     
             except Exception as e:
+                if "ComposioAuthRequired" in type(e).__name__:
+                    raise e
                 logger.error(f"Failed to post to {platform.value}: {e}")
                 results["failed_platforms"].append({
                     "platform": platform.value,
@@ -168,9 +170,9 @@ class ManageClipsUseCase:
                 "error": result.get("error")
             }
         except Exception as e:
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise e
             logger.error(f"Facebook Reel post failed: {e}")
-            if "ComposioAuthRequired" in str(e) or "auth" in str(e).lower():
-                 pass
             return {"success": False, "error": str(e)}
     
     async def _post_to_youtube_shorts(
@@ -182,11 +184,10 @@ class ManageClipsUseCase:
     ) -> Dict[str, Any]:
         """Post to YouTube Shorts"""
         try:
-            result = await self.youtube_api.upload_video(
+            result = await self.youtube_api.upload_short(
                 video_file_path=video_file_path,
                 title=title,
                 description=description,
-                category_id="22",
                 privacy_status="public",
                 tags=tags
             )
@@ -197,6 +198,8 @@ class ManageClipsUseCase:
                 "error": result.get("error")
             }
         except Exception as e:
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise e
             logger.error(f"YouTube upload failed: {e}")
             return {"success": False, "error": str(e)}
 
@@ -224,9 +227,7 @@ class ManageClipsUseCase:
                 "error": result.get("error")
             }
         except Exception as e:
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise e
             logger.error(f"Instagram Reel post failed: {e}")
-            # Check if it's an auth error to pass it up
-            if "ComposioAuthRequired" in str(e) or "auth" in str(e).lower():
-                 # We might want to re-raise or handle specific auth structure
-                 pass
             return {"success": False, "error": str(e)}

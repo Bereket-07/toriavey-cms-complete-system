@@ -1,0 +1,134 @@
+﻿Loading .env from: D:\desktop\work\EromoVentures Projects\ToriAveysCMS\backend\.env
+==================================================
+COMPOSIO AUTH CONFIGS LOADED:
+  YOUTUBE: ac_k52SYLzaka_3
+  LINKEDIN: [EMPTY]
+  TWITTER: ac_9tXZ0gV5ejEX
+  INSTAGRAM: ac_QEKa96-tlsr6
+  FACEBOOK: ac_1nIBqoVv6kQF
+  WORDPRESS: [EMPTY]
+==================================================
+Instagram Business Account ID: 17841478244183108
+Facebook Page ID: 963138326864286
+{
+  "name": "YOUTUBE_UPLOAD_VIDEO",
+  "description": "Uploads a video from a local file path to a youtube channel; the video file must be in a youtube-supported format.",
+  "parameters": {
+    "properties": {
+      "categoryId": {
+        "description": "YouTube category ID (e.g., '22' for People & Blogs). See YouTube Data API docs for a full list of category IDs. Please provide a value of type string. This parameter is required.",
+        "examples": [
+          "22"
+        ],
+        "title": "Category Id",
+        "type": "string"
+      },
+      "description": {
+        "description": "Detailed description of the video content, optionally including keywords and context. Please provide a value of type string. This parameter is required.",
+        "examples": [
+          "A detailed walkthrough of my latest project, showcasing all its features."
+        ],
+        "title": "Description",
+        "type": "string"
+      },
+      "privacyStatus": {
+        "description": "Privacy status: 'public', 'private' (uploader/specified users only), or 'unlisted' (link accessible, not publicly listed). Please provide a value of type string. This parameter is required.",
+        "examples": [
+          "public"
+        ],
+        "title": "Privacy Status",
+        "type": "string"
+      },
+      "tags": {
+        "description": "List of keyword tags (strings) for the video, used to improve discoverability. This parameter is required.",
+        "examples": [
+          "['educational', 'python', 'coding tutorial']"
+        ],
+        "items": {
+          "properties": {}
+        },
+        "title": "Tags",
+        "type": "array"
+      },
+      "title": {
+        "description": "The title for the video. Please provide a value of type string. This parameter is required.",
+        "examples": [
+          "My Awesome Video Adventure"
+        ],
+        "title": "Title",
+        "type": "string"
+      },
+      "videoFilePath": {
+        "description": "Local file path (absolute or relative) of the video to be uploaded. Please provide a value of type string. This parameter is required.",
+        "examples": [
+          "/path/to/my_video.mp4"
+        ],
+        "title": "Video File Path",
+        "type": "string"
+      }
+    },
+    "title": "UploadVideoRequest",
+    "type": "object",
+    "required": [
+      "title",
+      "description",
+      "tags",
+      "categoryId",
+      "privacyStatus",
+      "videoFilePath"
+    ],
+    "examples": null
+  },
+  "response": {
+    "properties": {
+      "data": {
+        "additionalProperties": false,
+        "description": "Data from the action execution. This parameter is required.",
+        "properties": {
+          "response_data": {
+            "additionalProperties": true,
+            "description": "Details from the YouTube API post-upload, typically including video ID, snippet, and status.",
+            "title": "Response Data",
+            "type": "object"
+          }
+        },
+        "required": [
+          "response_data"
+        ],
+        "title": "Data",
+        "type": "object"
+      },
+      "error": {
+        "default": null,
+        "description": "Error if any occurred during the execution of the action. Please provide a value of type string.",
+        "nullable": true,
+        "title": "Error",
+        "type": "string"
+      },
+      "successful": {
+        "description": "Whether or not the action execution was successful or not. Please provide a value of type boolean. This parameter is required.",
+        "title": "Successful",
+        "type": "boolean"
+      }
+    },
+    "title": "UploadVideoResponseWrapper",
+    "type": "object",
+    "required": [
+      "data",
+      "successful"
+    ],
+    "examples": null
+  },
+  "appName": "youtube",
+  "appId": "youtube",
+  "version": "00000000_00",
+  "available_versions": [
+    "00000000_00"
+  ],
+  "tags": [
+    "openWorldHint"
+  ],
+  "logo": "https://cdn.jsdelivr.net/gh/ComposioHQ/open-logos@master/youtube.svg",
+  "display_name": "Upload video",
+  "enabled": false
+}

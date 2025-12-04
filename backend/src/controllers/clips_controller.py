@@ -2,7 +2,7 @@
 
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, status
-from typing import List
+from typing import List, Dict, Any
 
 from src.domain.schemas.clip_schemas import (
     CreateClipsRequest,
@@ -17,6 +17,7 @@ from src.domain.schemas.clip_schemas import (
     SocialPostResponse
 )
 from src.use_cases.generate_clips import GenerateClipsUseCase
+from src.infrastructure.apis.composio import ComposioAuthRequired
 from src.use_cases.manage_clips import ManageClipsUseCase
 from src.infrastructure.repository.clip_repo import ClipRepository
 from src.infrastructure.apis.vizard_api import VizardAPI
@@ -28,32 +29,25 @@ router = APIRouter(prefix="/api/clips", tags=["Clips Management"])
 
 # ============= CLIP GENERATION ENDPOINTS =============
 
-@router.post("/generate", response_model=CreateClipsResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/generate", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
 async def generate_clips(
-    request: CreateClipsRequest,
-    background_tasks: BackgroundTasks
+    request: CreateClipsRequest
 ):
     """
     Generate video clips from a source video for multiple platforms.
     
     This endpoint submits the video to Vizard AI for processing.
-    Clips will be generated asynchronously and can be retrieved later.
-    
-    **Workflow:**
-    1. Submit video URL with target platforms
-    2. Vizard processes video and generates clips
-    3. Clips appear in pending dashboard for review
-    4. Approve/reject clips
-    5. Post approved clips to social media
+    Returns the project details for each platform immediately.
     """
     try:
         logger.info(f"Generating clips for {len(request.target_platforms)} platforms")
+        from src.domain.schemas.clip_schemas import VideoSourceType
         
         use_case = GenerateClipsUseCase()
         
-        # Start clip generation in background
-        background_tasks.add_task(
-            use_case.create_clips_for_platforms,
+        # Await the result directly instead of using background tasks
+        # This ensures we return the project IDs to the frontend
+        results = await use_case.create_clips_for_platforms(
             video_url=request.video_url,
             source_type=request.source_type,
             target_platforms=request.target_platforms,
@@ -64,13 +58,7 @@ async def generate_clips(
             file_extension=request.file_extension
         )
         
-        return CreateClipsResponse(
-            success=True,
-            message="Clip generation started successfully. Check back soon for results.",
-            vizard_project_id=None,  # Will be updated when Vizard responds
-            total_clips_requested=len(request.target_platforms) * request.max_clips_per_platform,
-            platforms=[p.value for p in request.target_platforms]
-        )
+        return results
         
     except Exception as e:
         logger.error(f"Failed to generate clips: {e}")
@@ -377,6 +365,17 @@ async def post_clip_to_social_media(request: PostClipRequest):
             failed_platforms=results["failed_platforms"]
         )
         
+    except ComposioAuthRequired as e:
+        logger.warning(f"Authentication required for posting: {e}")
+        return PostClipResponse(
+            success=False,
+            message="Authentication required",
+            clip_id=request.clip_id,
+            posted_platforms=[],
+            failed_platforms=[],
+            auth_required=True,
+            auth_url=e.auth_url
+        )
     except Exception as e:
         logger.error(f"Failed to post clip: {e}")
         raise HTTPException(

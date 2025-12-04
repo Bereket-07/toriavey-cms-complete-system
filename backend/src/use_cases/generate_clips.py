@@ -112,6 +112,7 @@ class GenerateClipsUseCase:
             TargetPlatform.TIKTOK: self.vizard_api.create_tiktok_clips,
             TargetPlatform.INSTAGRAM_REELS: self.vizard_api.create_instagram_reels,
             TargetPlatform.FACEBOOK_REELS: self.vizard_api.create_facebook_reels,
+            TargetPlatform.FACEBOOK: self.vizard_api.create_facebook_reels,
             TargetPlatform.LINKEDIN: self.vizard_api.create_linkedin_clips,
             TargetPlatform.TWITTER: self.vizard_api.create_twitter_clips,
         }
@@ -130,6 +131,27 @@ class GenerateClipsUseCase:
             project_name=project_name or f"{platform.value.replace('_', ' ').title()} Project",
             ext=file_extension
         )
+        
+        # Save project to DB
+        try:
+            from src.infrastructure.repository.clip_repo import ClipRepository
+            repo = ClipRepository()
+            
+            project_id = (result.get("data") or {}).get("projectId") or result.get("projectId")
+            if project_id:
+                repo.create_project({
+                    "project_id": project_id,
+                    "project_name": project_name or f"{platform.value.replace('_', ' ').title()} Project",
+                    "source_video_url": video_url,
+                    "source_platform": "youtube", # TODO: Map from video_type
+                    "target_platform": platform.value,
+                    "language": language,
+                    "max_clips": max_clips,
+                    "keywords": keywords
+                })
+                logger.info(f"Saved project {project_id} to DB")
+        except Exception as e:
+            logger.error(f"Failed to save project to DB: {e}")
         
         return result
     

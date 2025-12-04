@@ -183,7 +183,8 @@ class VizardAPI:
                         response_data=response_data
                     )
                 
-                logger.info(f"Project created successfully. Project ID: {response_data.get('data', {}).get('projectId')}")
+                project_id = (response_data.get('data') or {}).get('projectId')
+                logger.info(f"Project created successfully. Project ID: {project_id}")
                 return response_data
                 
         except httpx.HTTPError as e:

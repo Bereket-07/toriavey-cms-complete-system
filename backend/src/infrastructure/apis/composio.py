@@ -182,3 +182,75 @@ class ComposioExecutorService:
             raise ValueError("URN not found in LinkedIn user info response.")
 
         return urn
+
+    async def upload_file(self, file_name: str, file_content: bytes, content_type: str) -> Dict[str, Any]:
+        """
+        Upload a file to Composio's storage.
+        
+        Args:
+            file_name: Name of the file
+            file_content: Binary content of the file
+            content_type: MIME type of the file
+            
+        Returns:
+            Dict containing file ID and other metadata
+        """
+        import requests
+        import hashlib
+        import os
+        
+        # Calculate MD5
+        md5_hash = hashlib.md5(file_content).hexdigest()
+        
+        # Request upload URL
+        # Note: We hardcode YOUTUBE toolkit for now as it's the primary use case, 
+        # but this could be parameterized if needed.
+        upload_request_data = {
+            "toolkit_slug": "YOUTUBE",
+            "tool_slug": "YOUTUBE_UPLOAD_VIDEO",
+            "filename": file_name,
+            "mimetype": content_type,
+            "md5": md5_hash
+        }
+        
+        api_key = os.environ.get("COMPOSIO_API_KEY")
+        if not api_key:
+            # Fallback to trying to find it in config if not in env
+            # But usually it should be in env
+            logger.warning("COMPOSIO_API_KEY not found in environment, upload might fail if auth is required")
+        
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key
+        }
+        
+        logger.info(f"Requesting upload URL for {file_name}")
+        upload_response = await asyncio.to_thread(
+            requests.post,
+            "https://backend.composio.dev/api/v3/files/upload/request",
+            json=upload_request_data,
+            headers=headers
+        )
+        
+        if not upload_response.ok:
+            raise Exception(f"Failed to get upload URL: {upload_response.text}")
+        
+        upload_data = upload_response.json()
+        logger.info(f"Upload data received: {upload_data}")
+        
+        if upload_data.get("type") == "new":
+            presigned_url = upload_data.get("newPresignedUrl")
+            logger.info(f"Uploading file content to {presigned_url}")
+            
+            upload_file_response = await asyncio.to_thread(
+                requests.put,
+                presigned_url,
+                data=file_content,
+                headers={"Content-Type": content_type, "Content-Length": str(len(file_content))}
+            )
+            
+            if not upload_file_response.ok:
+                raise Exception(f"Failed to upload file to S3: {upload_file_response.status_code} {upload_file_response.text}")
+            logger.info("File uploaded to S3 successfully")
+            
+        return upload_data
