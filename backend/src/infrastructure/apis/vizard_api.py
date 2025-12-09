@@ -4,6 +4,7 @@ import logging
 import httpx
 from typing import Dict, Any, List, Optional
 from enum import IntEnum
+import time as import_time
 
 from src.config import VIZARD_API_KEY, VIZARD_API_BASE_URL
 
@@ -152,7 +153,18 @@ class VizardAPI:
         if ext:
             payload["ext"] = ext
         if project_name:
-            payload["projectName"] = project_name
+            import re
+            # Aggressively sanitize project name to avoid "syntax error" from Vizard API
+            # Keep only alphanumeric, spaces, hyphens and underscores
+            safe_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', project_name)
+            # Limit length just in case
+            safe_name = safe_name[:100].strip()
+            
+            # Fallback if empty
+            if not safe_name:
+                safe_name = f"Project {int(import_time.time())}"
+                
+            payload["projectName"] = safe_name
         if template_id:
             payload["templateId"] = template_id
         if max_clip_number is not None:
@@ -175,6 +187,9 @@ class VizardAPI:
                 
                 response_data = response.json()
                 
+                if response_data is None:
+                    raise VizardAPIError("API returned empty response", status_code=response.status_code)
+
                 if response.status_code != 200:
                     logger.error(f"Vizard API error: {response.status_code} - {response_data}")
                     raise VizardAPIError(

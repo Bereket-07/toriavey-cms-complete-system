@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 import time
 
 from composio import ComposioToolSet, App, Action
-from composio.exceptions import InvalidParams
+# from composio.exceptions import InvalidParams
 from src.config import COMPOSIO_AUTH_CONFIGS
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ class ComposioExecutorService:
             
             raise ConnectionError(f"Could not determine authentication method for {app_name}.")
 
-        except InvalidParams as e:               # <-- now works with the shim
+        except Exception as e:               # <-- now works with the shim
             error_str = str(e).lower()
             if 'connected_account_params' in error_str:
                 logger.info(f"{app_name} requires an API key. Raising challenge.")

@@ -71,6 +71,7 @@ class GenerateClipsUseCase:
         results = {}
         
         for platform in target_platforms:
+            logger.info(f"Processing platform: {platform}")
             try:
                 result = await self._create_clips_for_platform(
                     video_url=video_url,
@@ -82,15 +83,17 @@ class GenerateClipsUseCase:
                     project_name=project_name,
                     file_extension=file_extension
                 )
+                logger.info(f"Result for {platform}: {result}")
                 results[platform.value] = result
                 logger.info(f"Successfully created clips for {platform.value}")
             except Exception as e:
-                logger.error(f"Failed to create clips for {platform.value}: {e}")
+                logger.error(f"Failed to create clips for {platform.value}: {e}", exc_info=True)
                 results[platform.value] = {
                     "success": False,
                     "error": str(e)
                 }
         
+        logger.info(f"Returning results: {results}")
         return results
     
     async def _create_clips_for_platform(
@@ -105,6 +108,7 @@ class GenerateClipsUseCase:
         file_extension: str
     ) -> Dict[str, Any]:
         """Create clips for a specific platform"""
+        logger.info(f"Internal create clips for {platform}")
         
         # Map target platform to appropriate Vizard API method
         platform_methods = {
@@ -131,6 +135,9 @@ class GenerateClipsUseCase:
             project_name=project_name or f"{platform.value.replace('_', ' ').title()} Project",
             ext=file_extension
         )
+        
+        if not result:
+            raise ValueError(f"Failed to create clips for {platform.value}: Empty result")
         
         # Save project to DB
         try:

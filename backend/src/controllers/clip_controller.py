@@ -140,6 +140,16 @@ async def get_project_status(project_id: str):
             
             # Check if completed
             code = result.get("code") or result.get("data", {}).get("code")
+            
+            # 2000 is success. Anything else might be a failure or pending.
+            # Vizard docs say 2000 is success. 
+            # If code is explicitly a failure code (like 4008), we should delete.
+            # Assuming non-2000 and non-pending (if there is a pending code) is failure.
+            # But wait, what if it's just "processing"?
+            # Usually processing status is inside the data object, not the top level code.
+            # Top level code usually indicates API request status.
+            # If code != 2000, it's likely an error.
+            
             if code == 2000:
                 # Save clips to DB
                 # Check for videos in data object or at root
@@ -150,10 +160,36 @@ async def get_project_status(project_id: str):
                     repo.add_clips_to_project(project_id, videos)
                 else:
                     logger.warning(f"Project {project_id} completed but no videos found in response: {result.keys()}")
-            
-            return result
+            elif code and code != 2000:
+                # API returned an error code (e.g. 4008 Failed to download video)
+                logger.error(f"Vizard API returned error code {code} for project {project_id}: {result.get('errMsg')}")
+                
+                # Delete the failed project
+                try:
+                    await asyncio.to_thread(repo.delete_project, project_id)
+                    logger.info(f"Deleted failed project {project_id} due to API error code {code}")
+                except Exception as del_err:
+                    logger.error(f"Failed to delete project {project_id} after API error code: {del_err}")
+                
+                # Return error response
+                return {
+                    "code": code,
+                    "message": result.get("errMsg", "Unknown error"),
+                    "data": {
+                        "projectId": project_id,
+                        "status": "error"
+                    }
+                }
         except Exception as e:
             logger.error(f"Vizard API error for project {project_id}: {e}")
+            
+            # Delete the failed project from DB so it doesn't get polled again
+            try:
+                await asyncio.to_thread(repo.delete_project, project_id)
+                logger.info(f"Deleted failed project {project_id} from DB")
+            except Exception as del_err:
+                logger.error(f"Failed to delete project {project_id} after API error: {del_err}")
+
             # Return a graceful error response instead of 500
             return {
                 "code": 5000,
@@ -172,10 +208,16 @@ async def get_project_status(project_id: str):
 async def list_projects():
     """
     List all generated projects and clips.
+    Automatically cleans up failed projects before listing.
     """
     try:
         repo = ClipRepository()
-        return repo.get_all_projects()
+        
+        # Run cleanup in a separate thread to avoid blocking
+        await asyncio.to_thread(repo.delete_failed_projects)
+        
+        # Fetch projects in a separate thread
+        return await asyncio.to_thread(repo.get_all_projects)
     except Exception as e:
         logger.error(f"Failed to list projects: {e}")
         raise HTTPException(status_code=500, detail=str(e))

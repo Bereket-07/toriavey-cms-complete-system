@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import logging
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from src.infrastructure.repository.db_config import SessionLocal
 from src.domain.models.clip_model import VizardProject, VideoClip, ClipStatus
@@ -200,5 +201,108 @@ class ClipRepository:
             db.rollback()
             logger.error(f"Failed to update clip status: {e}")
             raise
+        finally:
+            db.close()
+
+    def delete_failed_projects(self):
+        """Delete all projects that have failed (have an error message)."""
+        db = SessionLocal()
+        try:
+            # Find failed projects
+            failed_projects = db.query(VizardProject).filter(VizardProject.error_message.isnot(None)).all()
+            
+            if not failed_projects:
+                return
+            
+            count = 0
+            for project in failed_projects:
+                # Delete associated clips first
+                db.query(VideoClip).filter(VideoClip.vizard_project_id == project.project_id).delete()
+                # Delete the project
+                db.delete(project)
+                count += 1
+            
+            db.commit()
+            if count > 0:
+                logger.info(f"Deleted {count} failed projects and their clips")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to delete failed projects: {e}")
+            raise
+        finally:
+            db.close()
+
+    def delete_project(self, project_id: str):
+        """Delete a project and its clips by project_id."""
+        db = SessionLocal()
+        try:
+            project = db.query(VizardProject).filter(VizardProject.project_id == project_id).first()
+            if project:
+                # Delete associated clips
+                db.query(VideoClip).filter(VideoClip.vizard_project_id == project_id).delete()
+                # Delete project
+                db.delete(project)
+                db.commit()
+                logger.info(f"Deleted project {project_id}")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to delete project {project_id}: {e}")
+            raise
+        finally:
+            db.close()
+
+    def project_exists(self, source_video_url: str, target_platform: str) -> bool:
+        """Check if a project already exists for the given source video and target platform."""
+        db = SessionLocal()
+        try:
+            # Check for exact match or if the platform is generic "youtube" but we want specific "youtube_shorts"
+            # Actually, we should check exact match on target_platform as stored in DB.
+            exists = db.query(VizardProject).filter(
+                VizardProject.source_video_url == source_video_url,
+                VizardProject.target_platform == target_platform
+            ).first()
+            return exists is not None
+        finally:
+            db.close()
+
+    def get_clip_stats(self) -> Dict[str, Any]:
+        """Aggregate statistics for video clips."""
+        db = SessionLocal()
+        try:
+            total_projects = db.query(VizardProject).count()
+            total_clips = db.query(VideoClip).count()
+            posted_clips = db.query(VideoClip).filter(VideoClip.status == "posted").count()
+            
+            # Platform breakdown from Projects
+            platforms = db.query(VizardProject.target_platform, func.count(VizardProject.id))\
+                .group_by(VizardProject.target_platform).all()
+            
+            platform_stats = {p[0]: p[1] for p in platforms}
+            
+            # Status breakdown
+            processing = db.query(VizardProject).filter(VizardProject.is_processed == False, VizardProject.error_message == None).count()
+            failed = db.query(VizardProject).filter(VizardProject.error_message != None).count()
+            completed = db.query(VizardProject).filter(VizardProject.is_processed == True).count()
+            
+            return {
+                "total_projects": total_projects,
+                "total_generated_clips": total_clips,
+                "total_posted_clips": posted_clips,
+                "by_platform": platform_stats,
+                "project_status": {
+                    "processing": processing,
+                    "completed": completed,
+                    "failed": failed
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to get clip stats: {e}")
+            return {
+                "total_projects": 0,
+                "total_generated_clips": 0,
+                "total_posted_clips": 0,
+                "by_platform": {},
+                "project_status": {"processing": 0, "completed": 0, "failed": 0}
+            }
         finally:
             db.close()

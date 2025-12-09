@@ -136,6 +136,22 @@ async def list_projects():
         )
 
 
+@router.get("/stats")
+async def get_clip_stats():
+    """
+    Get aggregated statistics for video clips.
+    """
+    try:
+        repo = ClipRepository()
+        return repo.get_clip_stats()
+    except Exception as e:
+        logger.error(f"Failed to get clip stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.get("/project/{project_id}")
 async def get_project_status(project_id: str):
     """
