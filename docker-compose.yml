@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # SSH Tunnel for Database Access
+  db-tunnel:
+    image: alpine:latest
+    container_name: db-tunnel
+    command: sh -c "apk add --no-cache openssh-client autossh && autossh -M 0 -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -N -p 2222 -L 0.0.0.0:3306:127.0.0.1:3306 -i /root/.ssh/id_rsa nginx@216.185.212.137"
+    volumes:
+      - ./secrets/id_rsa:/root/.ssh/id_rsa:ro
+    restart: always
+    networks:
+      - app-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tori-backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=db-tunnel
+      - DB_PORT=3306
+    ports:
+      - "7000:7000"
+    depends_on:
+      - db-tunnel
+    networks:
+      - app-network
+
+  # Frontend App
+  frontend:
+    build:
+      context: ./frontend/tori-data-garden
+      dockerfile: Dockerfile
+    container_name: tori-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -50,3 +50,19 @@ print(f"Instagram Business Account ID: {INSTAGRAM_BUSINESS_ACCOUNT_ID if INSTAGR
 # Facebook Configuration  
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
 print(f"Facebook Page ID: {FACEBOOK_PAGE_ID if FACEBOOK_PAGE_ID else '[EMPTY]'}")
+
+# Authentication Configuration
+GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")
+AUTHORIZED_EMAILS_RAW: str = os.getenv("AUTHORIZED_EMAILS", "") # Raw string for type hint consistency
+FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-please-change") # Failover for dev
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+TOKEN_STORE_PATH = os.getenv("TOKEN_STORE_PATH", "tokens")
+AUTHORIZED_EMAILS = [email.strip() for email in AUTHORIZED_EMAILS_RAW.split(",") if email.strip()]
+
+# Ensure token store directory exists
+if not os.path.exists(TOKEN_STORE_PATH):
+    os.makedirs(TOKEN_STORE_PATH)

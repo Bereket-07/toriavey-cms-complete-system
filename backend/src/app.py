@@ -1,9 +1,10 @@
 # src/app.py
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from contextlib import asynccontextmanager
+from src.deps.auth import require_google_login
 
 from src.controllers.clips_controller import router as clips_router
 from src.controllers.content_controller import router as content_router
@@ -11,6 +12,7 @@ from src.controllers.opus_clip_controller import router as opus_router
 from src.controllers.wprm_scheduler_controller import router as wprm_scheduler_router
 from src.controllers.youtube_scheduler_controller import router as youtube_scheduler_router
 from src.controllers.social_media_test_controller import router as social_test_router
+from src.api.v1.auth.router import router as auth_router
 
 # Configure logging
 logging.basicConfig(
@@ -101,19 +103,25 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Configure for production
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://164.92.127.224",
+        "*" # Keeping * for now as requested, but specific IPs are safer
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
-app.include_router(clips_router)
-app.include_router(content_router)
-app.include_router(opus_router)
-app.include_router(wprm_scheduler_router)
-app.include_router(youtube_scheduler_router)
-app.include_router(social_test_router)  # Social media testing endpoints
+app.include_router(clips_router, dependencies=[Depends(require_google_login)])
+app.include_router(content_router, dependencies=[Depends(require_google_login)])
+app.include_router(opus_router, dependencies=[Depends(require_google_login)])
+app.include_router(wprm_scheduler_router, dependencies=[Depends(require_google_login)])
+app.include_router(youtube_scheduler_router, dependencies=[Depends(require_google_login)])
+app.include_router(social_test_router, dependencies=[Depends(require_google_login)])  # Social media testing endpoints
+app.include_router(auth_router)
 
 # Root endpoint
 @app.get("/")
