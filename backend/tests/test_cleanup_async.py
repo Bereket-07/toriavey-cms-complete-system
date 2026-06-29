@@ -10,6 +10,7 @@ from src.controllers.clip_controller import list_projects
 # Since I can't easily mock everything in this environment without a full pytest setup,
 # I will write a script that can be run directly.
 
+@pytest.mark.live
 async def test_async_cleanup():
     print("Setting up test data...")
     repo = ClipRepository()

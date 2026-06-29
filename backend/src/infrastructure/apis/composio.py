@@ -30,13 +30,24 @@ class ComposioAuthRequired(Exception):
 class ComposioExecutorService:
     def __init__(self, entity_id: str, auth_config_map: Optional[Dict[str, str]] = None):
         self.entity_id = entity_id
-        self.toolset = ComposioToolSet(entity_id=entity_id)
+        # The ComposioToolSet is built lazily on first use. Constructing it
+        # eagerly here triggers a network call to validate the API key, which
+        # made the service impossible to construct (and therefore untestable)
+        # without live Composio credentials.
+        self._toolset = None
         # Use provided auth_config_map or fall back to global config
         self.auth_config_map = auth_config_map or COMPOSIO_AUTH_CONFIGS
 
+    @property
+    def toolset(self):
+        """Lazily build and cache the Composio toolset on first access."""
+        if self._toolset is None:
+            self._toolset = ComposioToolSet(entity_id=self.entity_id)
+        return self._toolset
+
     def refresh_client(self):
         logger.info(f"Refreshing Composio client for entity: {self.entity_id}")
-        self.toolset = ComposioToolSet(entity_id=self.entity_id)
+        self._toolset = ComposioToolSet(entity_id=self.entity_id)
 
     async def check_and_handle_authentication(
         self,

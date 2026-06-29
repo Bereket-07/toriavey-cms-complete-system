@@ -24,7 +24,6 @@ composio-langchain==0.6.10
 langchain==0.3.15
 langchain-core==0.3.31
 langchain-google-genai==2.0.8
-langchain-google-genai==2.0.8
 google-generativeai==0.8.3
 
 # Authentication
@@ -35,6 +34,13 @@ requests==2.31.0
 # Web Scraping
 beautifulsoup4==4.12.2
 lxml==4.9.3
+
+# Social Media (direct APIs)
+tweepy==4.16.0
+
+# Image & Video Processing
+Pillow==11.3.0
+imageio-ffmpeg==0.6.0
 
 # Date/Time Utilities
 python-dateutil==2.8.2

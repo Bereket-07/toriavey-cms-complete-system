@@ -21,12 +21,22 @@ from src.services.holiday_service import HolidayService
 logger = logging.getLogger(__name__)
 
 
-# Initialize LLM
-content_generator_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",  # Better analysis and understanding
-    google_api_key=GOOGLE_API_KEY,
-    temperature=0.7
-)
+# LLM is created lazily so importing this module (and therefore booting the
+# app) does not require GOOGLE_API_KEY to be set. The client is built on first
+# use and cached for the lifetime of the process.
+_content_generator_llm = None
+
+
+def get_content_generator_llm():
+    """Return a cached ChatGoogleGenerativeAI client, building it on first use."""
+    global _content_generator_llm
+    if _content_generator_llm is None:
+        _content_generator_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",  # Better analysis and understanding
+            google_api_key=GOOGLE_API_KEY,
+            temperature=0.7
+        )
+    return _content_generator_llm
 
 
 CONTENT_GENERATION_PROMPT = """
@@ -125,8 +135,15 @@ class GenerateContentUseCase:
     """
     
     def __init__(self):
-        self.llm = content_generator_llm
+        self._llm = None
         self.holiday_service = HolidayService()
+
+    @property
+    def llm(self):
+        """Lazily build and cache the LLM client on first access."""
+        if self._llm is None:
+            self._llm = get_content_generator_llm()
+        return self._llm
     
     async def generate_from_recipe_data(
         self,

@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from contextlib import contextmanager
 from src.utils.config  import settings
 DB_USER = settings.db_user
 DB_PASS = settings.db_password
@@ -15,9 +16,27 @@ Base = declarative_base()
 
 
 def get_db():
-    """Get database session"""
+    """Create and return a new database session.
+
+    NOTE: the caller owns the returned session and is responsible for closing
+    it (e.g. ``db.close()`` in a finally block, or use ``get_db_session()``
+    below as a context manager). The previous ``try/finally: pass`` here closed
+    nothing and was removed to avoid implying otherwise.
+    """
+    return SessionLocal()
+
+
+@contextmanager
+def get_db_session():
+    """Context-managed session that is always closed.
+
+    Preferred over ``get_db()`` for new code:
+
+        with get_db_session() as db:
+            db.query(...)
+    """
     db = SessionLocal()
     try:
-        return db
+        yield db
     finally:
-        pass  # Session will be closed by context manager
+        db.close()

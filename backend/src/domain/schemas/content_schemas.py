@@ -245,7 +245,7 @@ class EditContentResponse(BaseModel):
     """Response after editing content"""
     success: bool
     message: str
-    content: GeneratedContentResponse
+    content: Optional[GeneratedContentResponse] = None
 
 
 class SelectCaptionResponse(BaseModel):

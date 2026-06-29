@@ -1,10 +1,12 @@
 import asyncio
 import logging
+import pytest
 from src.use_cases.auto_generate_clips import AutoGenerateClipsUseCase
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
+@pytest.mark.live
 async def test_scheduler_logic():
     print("Testing AutoGenerateClipsUseCase...")
     

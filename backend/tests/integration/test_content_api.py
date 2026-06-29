@@ -1,9 +1,11 @@
 # tests/integration/test_content_api.py
 
 import pytest
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
 from src.app import app
+from src.domain.schemas.content_schemas import ContentPlatform
 
 
 @pytest.fixture
@@ -66,41 +68,45 @@ class TestContentGenerationAPI:
         assert "endpoints" in data
         assert "content" in data["endpoints"]
     
-    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data')
+    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data', new_callable=AsyncMock)
     def test_generate_content_success(self, mock_generate, client, sample_request_data):
         """Test successful content generation via API"""
-        # Mock the use case response
+        # Mock the use case response. The real generate_from_recipe_data returns
+        # a recipe object and generated_contents with ContentPlatform enums and
+        # GeneratedContentData-like objects (attribute access), so the mock mirrors that.
         mock_generate.return_value = {
-            "recipe": {
-                "title": "Integration Test Cookies",
-                "description": "Testing the API integration"
-            },
+            "recipe": SimpleNamespace(
+                title="Integration Test Cookies",
+                description="Testing the API integration",
+                url="https://example.com/recipes/cookies",
+                image_url="https://example.com/cookies.jpg",
+                cuisine="American",
+                prep_time="15 minutes",
+                cook_time="12 minutes",
+                servings="24 cookies",
+            ),
             "generated_contents": [
                 {
-                    "platform": "instagram",
-                    "content": {
-                        "caption": "🍪 Integration Test Cookies!",
-                        "hashtags": ["cookies", "baking"],
-                        "platform_specific": {
-                            "hook": "Amazing cookies!",
-                            "cta": "Try this!",
-                            "key_highlight": "Easy"
-                        }
-                    }
+                    "platform": ContentPlatform.INSTAGRAM,
+                    "content": SimpleNamespace(
+                        caption="🍪 Integration Test Cookies!",
+                        hashtags=["cookies", "baking"],
+                        platform_specific={"hook": "Amazing cookies!", "cta": "Try this!", "key_highlight": "Easy"},
+                        image_suggestions=["Close-up"],
+                        alternative_captions=["Alt caption"],
+                    ),
                 },
                 {
-                    "platform": "twitter",
-                    "content": {
-                        "caption": "🍪 Test Cookies - Quick and easy!",
-                        "hashtags": ["cookies", "baking"],
-                        "platform_specific": {
-                            "hook": "Quick cookies!",
-                            "cta": "Make today!",
-                            "key_highlight": "Fast"
-                        }
-                    }
-                }
-            ]
+                    "platform": ContentPlatform.TWITTER,
+                    "content": SimpleNamespace(
+                        caption="🍪 Test Cookies - Quick and easy!",
+                        hashtags=["cookies", "baking"],
+                        platform_specific={"hook": "Quick cookies!", "cta": "Make today!", "key_highlight": "Fast"},
+                        image_suggestions=["Plate"],
+                        alternative_captions=["Alt caption"],
+                    ),
+                },
+            ],
         }
         
         response = client.post("/api/content/generate", json=sample_request_data)
@@ -138,7 +144,7 @@ class TestContentGenerationAPI:
         response = client.post("/api/content/generate", json=sample_request_data)
         assert response.status_code == 422  # Validation error
     
-    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data')
+    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data', new_callable=AsyncMock)
     def test_generate_content_with_minimal_data(self, mock_generate, client):
         """Test content generation with minimal recipe data"""
         minimal_data = {
@@ -149,17 +155,28 @@ class TestContentGenerationAPI:
         }
         
         mock_generate.return_value = {
-            "recipe": {"title": "Minimal Recipe"},
+            "recipe": SimpleNamespace(
+                title="Minimal Recipe",
+                description=None,
+                url=None,
+                image_url=None,
+                cuisine=None,
+                prep_time=None,
+                cook_time=None,
+                servings=None,
+            ),
             "generated_contents": [
                 {
-                    "platform": "instagram",
-                    "content": {
-                        "caption": "Minimal Recipe",
-                        "hashtags": ["recipe"],
-                        "platform_specific": {"hook": "Test", "cta": "Try", "key_highlight": "Easy"}
-                    }
+                    "platform": ContentPlatform.INSTAGRAM,
+                    "content": SimpleNamespace(
+                        caption="Minimal Recipe",
+                        hashtags=["recipe"],
+                        platform_specific={"hook": "Test", "cta": "Try", "key_highlight": "Easy"},
+                        image_suggestions=[],
+                        alternative_captions=[],
+                    ),
                 }
-            ]
+            ],
         }
         
         response = client.post("/api/content/generate", json=minimal_data)

@@ -129,6 +129,9 @@ class TestGenerateContentUseCase:
         with patch('src.use_cases.generate_content.ChatPromptTemplate') as mock_prompt:
             mock_chain = AsyncMock()
             mock_chain.ainvoke = AsyncMock(return_value=mock_llm_response)
+            # The real chain is `prompt | llm | parser`; make the parser stage
+            # (mock_chain | parser) collapse back to mock_chain so ainvoke is awaited.
+            mock_chain.__or__ = Mock(return_value=mock_chain)
             mock_prompt.from_template.return_value.__or__ = Mock(return_value=mock_chain)
             
             result = await use_case.generate_from_recipe_data(
@@ -205,6 +208,9 @@ class TestGenerateContentUseCase:
         with patch('src.use_cases.generate_content.ChatPromptTemplate') as mock_prompt:
             mock_chain = AsyncMock()
             mock_chain.ainvoke = AsyncMock(return_value=mock_llm_response)
+            # The real chain is `prompt | llm | parser`; make the parser stage
+            # (mock_chain | parser) collapse back to mock_chain so ainvoke is awaited.
+            mock_chain.__or__ = Mock(return_value=mock_chain)
             mock_prompt.from_template.return_value.__or__ = Mock(return_value=mock_chain)
             
             result = await use_case.generate_from_recipe_data(
