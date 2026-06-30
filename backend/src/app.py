@@ -12,6 +12,7 @@ from src.controllers.opus_clip_controller import router as opus_router
 from src.controllers.wprm_scheduler_controller import router as wprm_scheduler_router
 from src.controllers.youtube_scheduler_controller import router as youtube_scheduler_router
 from src.controllers.social_media_test_controller import router as social_test_router
+from src.controllers.ebook_controller import router as ebook_router
 from src.api.v1.auth.router import router as auth_router
 
 # Configure logging
@@ -122,6 +123,7 @@ app.include_router(wprm_scheduler_router, dependencies=[Depends(require_google_l
 app.include_router(youtube_scheduler_router, dependencies=[Depends(require_google_login)])
 app.include_router(social_test_router, dependencies=[Depends(require_google_login)])  # Social media testing endpoints
 app.include_router(auth_router)
+app.include_router(ebook_router, dependencies=[Depends(require_google_login)])
 
 # Root endpoint
 @app.get("/")
