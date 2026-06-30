@@ -1,0 +1,434 @@
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+index e54f416..96c0707 100644
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -24,7 +24,6 @@ composio-langchain==0.6.10
+ langchain==0.3.15
+ langchain-core==0.3.31
+ langchain-google-genai==2.0.8
+-langchain-google-genai==2.0.8
+ google-generativeai==0.8.3
+ 
+ # Authentication
+@@ -36,6 +35,13 @@ requests==2.31.0
+ beautifulsoup4==4.12.2
+ lxml==4.9.3
+ 
++# Social Media (direct APIs)
++tweepy==4.16.0
++
++# Image & Video Processing
++Pillow==11.3.0
++imageio-ffmpeg==0.6.0
++
+ # Date/Time Utilities
+ python-dateutil==2.8.2
+ holidays==0.85
+diff --git a/backend/src/domain/schemas/content_schemas.py b/backend/src/domain/schemas/content_schemas.py
+index 9287cec..d717ab2 100644
+--- a/backend/src/domain/schemas/content_schemas.py
++++ b/backend/src/domain/schemas/content_schemas.py
+@@ -245,7 +245,7 @@ class EditContentResponse(BaseModel):
+     """Response after editing content"""
+     success: bool
+     message: str
+-    content: GeneratedContentResponse
++    content: Optional[GeneratedContentResponse] = None
+ 
+ 
+ class SelectCaptionResponse(BaseModel):
+diff --git a/backend/src/infrastructure/apis/composio.py b/backend/src/infrastructure/apis/composio.py
+index 5b35e4a..55768be 100644
+--- a/backend/src/infrastructure/apis/composio.py
++++ b/backend/src/infrastructure/apis/composio.py
+@@ -30,13 +30,24 @@ class ComposioAuthRequired(Exception):
+ class ComposioExecutorService:
+     def __init__(self, entity_id: str, auth_config_map: Optional[Dict[str, str]] = None):
+         self.entity_id = entity_id
+-        self.toolset = ComposioToolSet(entity_id=entity_id)
++        # The ComposioToolSet is built lazily on first use. Constructing it
++        # eagerly here triggers a network call to validate the API key, which
++        # made the service impossible to construct (and therefore untestable)
++        # without live Composio credentials.
++        self._toolset = None
+         # Use provided auth_config_map or fall back to global config
+         self.auth_config_map = auth_config_map or COMPOSIO_AUTH_CONFIGS
+ 
++    @property
++    def toolset(self):
++        """Lazily build and cache the Composio toolset on first access."""
++        if self._toolset is None:
++            self._toolset = ComposioToolSet(entity_id=self.entity_id)
++        return self._toolset
++
+     def refresh_client(self):
+         logger.info(f"Refreshing Composio client for entity: {self.entity_id}")
+-        self.toolset = ComposioToolSet(entity_id=self.entity_id)
++        self._toolset = ComposioToolSet(entity_id=self.entity_id)
+ 
+     async def check_and_handle_authentication(
+         self,
+diff --git a/backend/src/infrastructure/repository/db_config.py b/backend/src/infrastructure/repository/db_config.py
+index 452d85f..3a98a68 100644
+--- a/backend/src/infrastructure/repository/db_config.py
++++ b/backend/src/infrastructure/repository/db_config.py
+@@ -1,5 +1,6 @@
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import sessionmaker, declarative_base
++from contextlib import contextmanager
+ from src.utils.config  import settings
+ DB_USER = settings.db_user
+ DB_PASS = settings.db_password
+@@ -15,9 +16,27 @@ Base = declarative_base()
+ 
+ 
+ def get_db():
+-    """Get database session"""
++    """Create and return a new database session.
++
++    NOTE: the caller owns the returned session and is responsible for closing
++    it (e.g. ``db.close()`` in a finally block, or use ``get_db_session()``
++    below as a context manager). The previous ``try/finally: pass`` here closed
++    nothing and was removed to avoid implying otherwise.
++    """
++    return SessionLocal()
++
++
++@contextmanager
++def get_db_session():
++    """Context-managed session that is always closed.
++
++    Preferred over ``get_db()`` for new code:
++
++        with get_db_session() as db:
++            db.query(...)
++    """
+     db = SessionLocal()
+     try:
+-        return db
++        yield db
+     finally:
+-        pass  # Session will be closed by context manager
++        db.close()
+diff --git a/backend/src/use_cases/generate_content.py b/backend/src/use_cases/generate_content.py
+index e02d387..b30266b 100644
+--- a/backend/src/use_cases/generate_content.py
++++ b/backend/src/use_cases/generate_content.py
+@@ -21,12 +21,22 @@ from src.services.holiday_service import HolidayService
+ logger = logging.getLogger(__name__)
+ 
+ 
+-# Initialize LLM
+-content_generator_llm = ChatGoogleGenerativeAI(
+-    model="gemini-2.5-flash",  # Better analysis and understanding
+-    google_api_key=GOOGLE_API_KEY,
+-    temperature=0.7
+-)
++# LLM is created lazily so importing this module (and therefore booting the
++# app) does not require GOOGLE_API_KEY to be set. The client is built on first
++# use and cached for the lifetime of the process.
++_content_generator_llm = None
++
++
++def get_content_generator_llm():
++    """Return a cached ChatGoogleGenerativeAI client, building it on first use."""
++    global _content_generator_llm
++    if _content_generator_llm is None:
++        _content_generator_llm = ChatGoogleGenerativeAI(
++            model="gemini-2.5-flash",  # Better analysis and understanding
++            google_api_key=GOOGLE_API_KEY,
++            temperature=0.7
++        )
++    return _content_generator_llm
+ 
+ 
+ CONTENT_GENERATION_PROMPT = """
+@@ -125,8 +135,15 @@ class GenerateContentUseCase:
+     """
+     
+     def __init__(self):
+-        self.llm = content_generator_llm
++        self._llm = None
+         self.holiday_service = HolidayService()
++
++    @property
++    def llm(self):
++        """Lazily build and cache the LLM client on first access."""
++        if self._llm is None:
++            self._llm = get_content_generator_llm()
++        return self._llm
+     
+     async def generate_from_recipe_data(
+         self,
+diff --git a/backend/tests/conftest.py b/backend/tests/conftest.py
+index 365cf98..d027cef 100644
+--- a/backend/tests/conftest.py
++++ b/backend/tests/conftest.py
+@@ -1,14 +1,77 @@
+ # tests/conftest.py
+ 
+-import pytest
++import os
+ import sys
+ from pathlib import Path
+ 
++import pytest
++
++# ---------------------------------------------------------------------------
++# Environment setup
++# ---------------------------------------------------------------------------
++# Set dummy values BEFORE any `src.*` module is imported. src.config and
++# src.utils.config read environment variables at import time (and Settings()
++# requires the DB_* vars), so the test suite must not depend on a real .env
++# file or live credentials. setdefault lets a real environment override these.
++os.environ.setdefault("DB_HOST", "localhost")
++os.environ.setdefault("DB_PORT", "3306")
++os.environ.setdefault("DB_USER", "test")
++os.environ.setdefault("DB_PASSWORD", "test")
++os.environ.setdefault("DB_NAME", "testdb")
++os.environ.setdefault("JWT_SECRET", "test-secret-key")
++os.environ.setdefault("GOOGLE_API_KEY", "test-google-api-key")
++os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
++os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
++os.environ.setdefault("COMPOSIO_API_KEY", "test-composio-key")
++os.environ.setdefault("VIZARD_API_KEY", "test-vizard-key")
++
+ # Add project root to Python path
+ project_root = Path(__file__).parent.parent
+ sys.path.insert(0, str(project_root))
+ 
+ 
++# ---------------------------------------------------------------------------
++# Markers: `live` tests need a real DB + external APIs and are skipped unless
++# RUN_LIVE_TESTS=1 is set in the environment.
++# ---------------------------------------------------------------------------
++def pytest_configure(config):
++    config.addinivalue_line(
++        "markers",
++        "live: test requires a live database and external APIs; "
++        "skipped unless RUN_LIVE_TESTS=1",
++    )
++
++
++def pytest_collection_modifyitems(config, items):
++    if os.environ.get("RUN_LIVE_TESTS") == "1":
++        return
++    skip_live = pytest.mark.skip(reason="needs live DB/APIs; set RUN_LIVE_TESTS=1 to run")
++    for item in items:
++        if "live" in item.keywords:
++            item.add_marker(skip_live)
++
++
++# ---------------------------------------------------------------------------
++# Auth override: every gated router depends on require_google_login. For tests
++# we replace it with a fake authenticated user so endpoint logic is exercised
++# rather than the auth gate (which would otherwise return 403 everywhere).
++# ---------------------------------------------------------------------------
++@pytest.fixture(autouse=True)
++def override_auth():
++    from src.app import app
++    from src.deps.auth import require_google_login
++
++    def _fake_user():
++        return {"user_id": "test-user", "email": "test@example.com", "creds": None}
++
++    app.dependency_overrides[require_google_login] = _fake_user
++    yield
++    app.dependency_overrides.pop(require_google_login, None)
++
++
++# ---------------------------------------------------------------------------
++# Existing fixtures (preserved)
++# ---------------------------------------------------------------------------
+ @pytest.fixture(scope="session")
+ def test_config():
+     """Test configuration"""
+diff --git a/backend/tests/integration/test_content_api.py b/backend/tests/integration/test_content_api.py
+index 77bf38b..2e6f37c 100644
+--- a/backend/tests/integration/test_content_api.py
++++ b/backend/tests/integration/test_content_api.py
+@@ -1,9 +1,11 @@
+ # tests/integration/test_content_api.py
+ 
+ import pytest
++from types import SimpleNamespace
+ from fastapi.testclient import TestClient
+ from unittest.mock import patch, AsyncMock
+ from src.app import app
++from src.domain.schemas.content_schemas import ContentPlatform
+ 
+ 
+ @pytest.fixture
+@@ -66,41 +68,45 @@ class TestContentGenerationAPI:
+         assert "endpoints" in data
+         assert "content" in data["endpoints"]
+     
+-    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data')
++    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data', new_callable=AsyncMock)
+     def test_generate_content_success(self, mock_generate, client, sample_request_data):
+         """Test successful content generation via API"""
+-        # Mock the use case response
++        # Mock the use case response. The real generate_from_recipe_data returns
++        # a recipe object and generated_contents with ContentPlatform enums and
++        # GeneratedContentData-like objects (attribute access), so the mock mirrors that.
+         mock_generate.return_value = {
+-            "recipe": {
+-                "title": "Integration Test Cookies",
+-                "description": "Testing the API integration"
+-            },
++            "recipe": SimpleNamespace(
++                title="Integration Test Cookies",
++                description="Testing the API integration",
++                url="https://example.com/recipes/cookies",
++                image_url="https://example.com/cookies.jpg",
++                cuisine="American",
++                prep_time="15 minutes",
++                cook_time="12 minutes",
++                servings="24 cookies",
++            ),
+             "generated_contents": [
+                 {
+-                    "platform": "instagram",
+-                    "content": {
+-                        "caption": "🍪 Integration Test Cookies!",
+-                        "hashtags": ["cookies", "baking"],
+-                        "platform_specific": {
+-                            "hook": "Amazing cookies!",
+-                            "cta": "Try this!",
+-                            "key_highlight": "Easy"
+-                        }
+-                    }
++                    "platform": ContentPlatform.INSTAGRAM,
++                    "content": SimpleNamespace(
++                        caption="🍪 Integration Test Cookies!",
++                        hashtags=["cookies", "baking"],
++                        platform_specific={"hook": "Amazing cookies!", "cta": "Try this!", "key_highlight": "Easy"},
++                        image_suggestions=["Close-up"],
++                        alternative_captions=["Alt caption"],
++                    ),
+                 },
+                 {
+-                    "platform": "twitter",
+-                    "content": {
+-                        "caption": "🍪 Test Cookies - Quick and easy!",
+-                        "hashtags": ["cookies", "baking"],
+-                        "platform_specific": {
+-                            "hook": "Quick cookies!",
+-                            "cta": "Make today!",
+-                            "key_highlight": "Fast"
+-                        }
+-                    }
+-                }
+-            ]
++                    "platform": ContentPlatform.TWITTER,
++                    "content": SimpleNamespace(
++                        caption="🍪 Test Cookies - Quick and easy!",
++                        hashtags=["cookies", "baking"],
++                        platform_specific={"hook": "Quick cookies!", "cta": "Make today!", "key_highlight": "Fast"},
++                        image_suggestions=["Plate"],
++                        alternative_captions=["Alt caption"],
++                    ),
++                },
++            ],
+         }
+         
+         response = client.post("/api/content/generate", json=sample_request_data)
+@@ -138,7 +144,7 @@ class TestContentGenerationAPI:
+         response = client.post("/api/content/generate", json=sample_request_data)
+         assert response.status_code == 422  # Validation error
+     
+-    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data')
++    @patch('src.use_cases.generate_content.GenerateContentUseCase.generate_from_recipe_data', new_callable=AsyncMock)
+     def test_generate_content_with_minimal_data(self, mock_generate, client):
+         """Test content generation with minimal recipe data"""
+         minimal_data = {
+@@ -149,17 +155,28 @@ class TestContentGenerationAPI:
+         }
+         
+         mock_generate.return_value = {
+-            "recipe": {"title": "Minimal Recipe"},
++            "recipe": SimpleNamespace(
++                title="Minimal Recipe",
++                description=None,
++                url=None,
++                image_url=None,
++                cuisine=None,
++                prep_time=None,
++                cook_time=None,
++                servings=None,
++            ),
+             "generated_contents": [
+                 {
+-                    "platform": "instagram",
+-                    "content": {
+-                        "caption": "Minimal Recipe",
+-                        "hashtags": ["recipe"],
+-                        "platform_specific": {"hook": "Test", "cta": "Try", "key_highlight": "Easy"}
+-                    }
++                    "platform": ContentPlatform.INSTAGRAM,
++                    "content": SimpleNamespace(
++                        caption="Minimal Recipe",
++                        hashtags=["recipe"],
++                        platform_specific={"hook": "Test", "cta": "Try", "key_highlight": "Easy"},
++                        image_suggestions=[],
++                        alternative_captions=[],
++                    ),
+                 }
+-            ]
++            ],
+         }
+         
+         response = client.post("/api/content/generate", json=minimal_data)
+diff --git a/backend/tests/test_cleanup_async.py b/backend/tests/test_cleanup_async.py
+index da2ac50..4d6abc8 100644
+--- a/backend/tests/test_cleanup_async.py
++++ b/backend/tests/test_cleanup_async.py
+@@ -10,6 +10,7 @@ from src.controllers.clip_controller import list_projects
+ # Since I can't easily mock everything in this environment without a full pytest setup,
+ # I will write a script that can be run directly.
+ 
++@pytest.mark.live
+ async def test_async_cleanup():
+     print("Setting up test data...")
+     repo = ClipRepository()
+diff --git a/backend/tests/test_youtube_scheduler.py b/backend/tests/test_youtube_scheduler.py
+index 42c6a9f..07b7ca9 100644
+--- a/backend/tests/test_youtube_scheduler.py
++++ b/backend/tests/test_youtube_scheduler.py
+@@ -1,10 +1,12 @@
+ import asyncio
+ import logging
++import pytest
+ from src.use_cases.auto_generate_clips import AutoGenerateClipsUseCase
+ 
+ # Configure logging
+ logging.basicConfig(level=logging.INFO)
+ 
++@pytest.mark.live
+ async def test_scheduler_logic():
+     print("Testing AutoGenerateClipsUseCase...")
+     
+diff --git a/backend/tests/unit/test_generate_content.py b/backend/tests/unit/test_generate_content.py
+index b41bd9b..9b95e1c 100644
+--- a/backend/tests/unit/test_generate_content.py
++++ b/backend/tests/unit/test_generate_content.py
+@@ -129,6 +129,9 @@ class TestGenerateContentUseCase:
+         with patch('src.use_cases.generate_content.ChatPromptTemplate') as mock_prompt:
+             mock_chain = AsyncMock()
+             mock_chain.ainvoke = AsyncMock(return_value=mock_llm_response)
++            # The real chain is `prompt | llm | parser`; make the parser stage
++            # (mock_chain | parser) collapse back to mock_chain so ainvoke is awaited.
++            mock_chain.__or__ = Mock(return_value=mock_chain)
+             mock_prompt.from_template.return_value.__or__ = Mock(return_value=mock_chain)
+             
+             result = await use_case.generate_from_recipe_data(
+@@ -205,6 +208,9 @@ class TestGenerateContentUseCase:
+         with patch('src.use_cases.generate_content.ChatPromptTemplate') as mock_prompt:
+             mock_chain = AsyncMock()
+             mock_chain.ainvoke = AsyncMock(return_value=mock_llm_response)
++            # The real chain is `prompt | llm | parser`; make the parser stage
++            # (mock_chain | parser) collapse back to mock_chain so ainvoke is awaited.
++            mock_chain.__or__ = Mock(return_value=mock_chain)
+             mock_prompt.from_template.return_value.__or__ = Mock(return_value=mock_chain)
+             
+             result = await use_case.generate_from_recipe_data(
