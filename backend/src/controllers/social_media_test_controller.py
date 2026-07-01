@@ -1,37 +1,37 @@
 # src/controllers/social_media_test_controller.py
-
+ 
 import logging
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
-
+ 
 from src.infrastructure.apis.instagram_api import InstagramAPI
 from src.infrastructure.apis.twitter_api import TwitterAPI
 from src.infrastructure.apis.composio import ComposioAuthRequired, ComposioApiKeyRequired
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
 router = APIRouter(prefix="/api/test", tags=["Social Media Testing"])
-
-
+ 
+ 
 # ============= REQUEST SCHEMAS =============
-
+ 
 class InstagramTestPostRequest(BaseModel):
     """Request to test Instagram posting"""
     image_url: str
     caption: str
     entity_id: str = "pg-test-e3058604-b827-4348-b57e-c9006a2ba98c"  # Default test entity
-
-
+ 
+ 
 class TwitterTestPostRequest(BaseModel):
     """Request to test Twitter posting"""
     text: str
     media_url: Optional[str] = None
     entity_id: str = "pg-test-e3058604-b827-4348-b57e-c9006a2ba98c"  # Default test entity
-
-
+ 
+ 
 # ============= TEST ENDPOINTS =============
-
+ 
 @router.post("/instagram-auth")
 async def test_instagram_auth(entity_id: str = "pg-test-e3058604-b827-4348-b57e-c9006a2ba98c"):
     """
@@ -76,8 +76,8 @@ async def test_instagram_auth(entity_id: str = "pg-test-e3058604-b827-4348-b57e-
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-
+ 
+ 
 @router.post("/twitter-auth")
 async def test_twitter_auth(entity_id: str = "pg-test-e3058604-b827-4348-b57e-c9006a2ba98c"):
     """
@@ -122,8 +122,8 @@ async def test_twitter_auth(entity_id: str = "pg-test-e3058604-b827-4348-b57e-c9
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-
+ 
+ 
 @router.post("/instagram-post")
 async def test_instagram_post(request: InstagramTestPostRequest):
     """
@@ -176,8 +176,8 @@ async def test_instagram_post(request: InstagramTestPostRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-
+ 
+ 
 @router.post("/twitter-post")
 async def test_twitter_post(request: TwitterTestPostRequest):
     """
@@ -245,8 +245,8 @@ async def test_twitter_post(request: TwitterTestPostRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-
+ 
+ 
 @router.get("/health")
 async def health_check():
     """Health check for social media test endpoints"""
@@ -260,3 +260,4 @@ async def health_check():
             "POST /api/test/twitter-post"
         ]
     }
+ 

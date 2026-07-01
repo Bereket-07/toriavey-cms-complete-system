@@ -1,11 +1,11 @@
 # src/app.py
-
+ 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from contextlib import asynccontextmanager
 from src.deps.auth import require_google_login
-
+ 
 from src.controllers.clips_controller import router as clips_router
 from src.controllers.content_controller import router as content_router
 from src.controllers.opus_clip_controller import router as opus_router
@@ -14,15 +14,15 @@ from src.controllers.youtube_scheduler_controller import router as youtube_sched
 from src.controllers.social_media_test_controller import router as social_test_router
 from src.controllers.ebook_controller import router as ebook_router
 from src.api.v1.auth.router import router as auth_router
-
+ 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
             logger.info("✅ YouTube Clip Scheduler stopped")
     except Exception as e:
         logger.error(f"❌ Failed to stop YouTube Clip Scheduler: {e}")
-
+ 
 # Initialize FastAPI app
 app = FastAPI(
     title="Tori Avey CMS - Content Management System",
@@ -100,7 +100,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
-
+ 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -108,13 +108,14 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "http://164.92.127.224",
-        "*" # Keeping * for now as requested, but specific IPs are safer
+        # NOTE: never add "*" here while allow_credentials=True — the combination
+        # is rejected by browsers and unsafe. Add real front-end origins instead.
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+ 
 # Include routers
 app.include_router(clips_router, dependencies=[Depends(require_google_login)])
 app.include_router(content_router, dependencies=[Depends(require_google_login)])
@@ -122,9 +123,9 @@ app.include_router(opus_router, dependencies=[Depends(require_google_login)])
 app.include_router(wprm_scheduler_router, dependencies=[Depends(require_google_login)])
 app.include_router(youtube_scheduler_router, dependencies=[Depends(require_google_login)])
 app.include_router(social_test_router, dependencies=[Depends(require_google_login)])  # Social media testing endpoints
+app.include_router(ebook_router, dependencies=[Depends(require_google_login)])  # AI e-book generation
 app.include_router(auth_router)
-app.include_router(ebook_router, dependencies=[Depends(require_google_login)])
-
+ 
 # Root endpoint
 @app.get("/")
 async def root():
@@ -142,7 +143,7 @@ async def root():
             "test": "/api/test (Social Media Testing)"
         }
     }
-
+ 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -152,7 +153,16 @@ async def health_check():
         "service": "toriavey-cms",
         "version": "1.0.0"
     }
-
+ 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7000, reload=True)
+ 
+
+
+
+
+
+
+
+
