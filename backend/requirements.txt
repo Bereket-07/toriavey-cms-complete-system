@@ -17,8 +17,8 @@ phpserialize==1.3
 python-dotenv==1.0.1
 
 # Composio Integration (for social media APIs)
-composio-core==0.6.10
-composio-langchain==0.6.10
+composio-core==0.7.21
+composio-langchain==0.7.21
 
 # LangChain and Google Gemini
 langchain==0.3.15
