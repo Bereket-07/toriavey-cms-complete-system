@@ -5,7 +5,6 @@ import base64
 from typing import Dict, Any, List, Optional
  
 import requests
-from composio import Action
  
 from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
  
@@ -80,9 +79,9 @@ class TwitterAPI:
             post_action = None
             
             for action in actions:
-                if "CREATION_OF_A_POST" in action.name.upper():
+                if "CREATION_OF_A_POST" in action.upper():
                     post_action = action
-                    logger.info(f"Using Twitter action: {action.name}")
+                    logger.info(f"Using Twitter action: {action}")
                     break
             
             if not post_action:
@@ -131,7 +130,7 @@ class TwitterAPI:
         """
         try:
             actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            action_names = [action.name for action in actions]
+            action_names = list(actions)
             logger.info(f"Found {len(action_names)} Twitter actions")
             return {
                 "successful": True,
@@ -146,9 +145,9 @@ class TwitterAPI:
         """Find the first Twitter action whose name contains all given substrings."""
         actions = await self.composio_executor.get_actions_for_app(self.app_name)
         for action in actions:
-            name = action.name.upper()
+            name = action.upper()
             if all(part.upper() in name for part in name_parts):
-                logger.info(f"Using Twitter action: {action.name}")
+                logger.info(f"Using Twitter action: {action}")
                 return action
         return None
  

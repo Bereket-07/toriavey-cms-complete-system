@@ -1,247 +1,202 @@
 # src/infrastructure/apis/facebook_api.py
+#
+# Facebook API wrapper using Composio (new `composio` 0.17.x SDK).
+# Actions are plain string slugs (e.g. "FACEBOOK_CREATE_POST").
+#
+# Supports:
+#   - post_to_page(message, image_url=None, page_id=None)  -> text or photo post
+#   - upload_reel(video_url, caption, page_id, title)      -> video/reel post
+#
+# All methods return a consistent shape:
+#   {"successful": bool, "post_id": str|None, "post_url": str|None, "error": str|None}
 import logging
 from typing import Dict, Any, Optional
-from composio import Action
+ 
 from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
 from src import config
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
+ 
 class FacebookAPI:
-    """
-    Facebook API wrapper using Composio for video uploads (Reels).
-    Uses FACEBOOK_POST_PAGE_VIDEO for posting reels.
-    """
-
+    """Facebook Page publishing via Composio (text, photo, and video/reel posts)."""
+ 
+    # Action slugs (confirmed against the live Composio Facebook toolkit).
+    ACTION_TEXT_POST = "FACEBOOK_CREATE_POST"
+    ACTION_PHOTO_POST = "FACEBOOK_CREATE_PHOTO_POST"
+    ACTION_VIDEO_POST = "FACEBOOK_CREATE_VIDEO_POST"
+ 
     def __init__(self, entity_id: str):
-        """Initialize Facebook API with Composio executor."""
         self.entity_id = entity_id
         self.composio_executor = ComposioExecutorService(entity_id=entity_id)
         self.app_name = "FACEBOOK"
-        self.max_description_length = 5000 # Facebook is generous, but we'll stick to a reasonable limit
+        self.max_description_length = 5000
         self.page_id = config.FACEBOOK_PAGE_ID
         logger.info(f"FacebookAPI initialized for entity: {entity_id}, page_id: {self.page_id}")
-
+ 
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
     async def _ensure_authentication(self) -> None:
-        """Ensure Facebook OAuth authentication."""
-        await self.composio_executor.check_and_handle_authentication(
-            app_name=self.app_name
-        )
-
-    def _truncate_text(self, text: str, max_length: int = None) -> str:
-        """Truncate text to fit Facebook's limit."""
+        """Ensure Facebook is connected; raises ComposioAuthRequired if OAuth needed."""
+        await self.composio_executor.check_and_handle_authentication(app_name=self.app_name)
+ 
+    def _truncate_text(self, text: str, max_length: Optional[int] = None) -> str:
         if max_length is None:
             max_length = self.max_description_length
-        if len(text) <= max_length:
+        if not text or len(text) <= max_length:
             return text
-        return text[:max_length - 3] + "..."
-
+        return text[: max_length - 3] + "..."
+ 
+    @staticmethod
+    def _normalize(result: Any) -> Dict[str, Any]:
+        """
+        Turn a Composio result (envelope {data,error,successful} OR already-normalized dict)
+        into the consistent shape {successful, post_id, post_url, error}.
+        """
+        # Already normalized?
+        if isinstance(result, dict) and "post_id" in result and "successful" in result:
+            return result
+ 
+        successful = False
+        data: Dict[str, Any] = {}
+        error = None
+        if isinstance(result, dict):
+            successful = bool(result.get("successful"))
+            data = result.get("data") or {}
+            error = result.get("error")
+        # Facebook post ids look like "<pageid>_<postid>"
+        post_id = None
+        if isinstance(data, dict):
+            post_id = data.get("id") or data.get("post_id")
+        post_url = f"https://www.facebook.com/{post_id}" if post_id else None
+        if not successful and error is None:
+            error = "Unknown error (no data returned)"
+        return {
+            "successful": successful,
+            "post_id": post_id,
+            "post_url": post_url,
+            "error": None if successful else error,
+        }
+ 
+    def _error(self, message: str) -> Dict[str, Any]:
+        return {"successful": False, "post_id": None, "post_url": None, "error": message}
+ 
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+    async def post_to_page(
+        self,
+        message: str,
+        image_url: Optional[str] = None,
+        page_id: Optional[str] = None,
+        truncate: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Post text (FACEBOOK_CREATE_POST) or a photo (FACEBOOK_CREATE_PHOTO_POST) to a Page.
+ 
+        Args:
+            message: post text / photo caption
+            image_url: if given, publishes a photo post with this image URL
+            page_id: target Page id (falls back to config.FACEBOOK_PAGE_ID)
+            truncate: auto-truncate long messages
+        Returns:
+            {"successful", "post_id", "post_url", "error"}
+        """
+        target_page_id = page_id or self.page_id
+        logger.info(f"Posting to Facebook Page {target_page_id}: {message[:50]}...")
+ 
+        if not target_page_id:
+            return self._error("No Facebook Page ID provided or configured.")
+ 
+        try:
+            await self._ensure_authentication()
+ 
+            if truncate and message:
+                message = self._truncate_text(message)
+ 
+            if image_url:
+                logger.info("Using FACEBOOK_CREATE_PHOTO_POST")
+                params = {"page_id": target_page_id, "message": message, "url": image_url}
+                action = self.ACTION_PHOTO_POST
+            else:
+                logger.info("Using FACEBOOK_CREATE_POST")
+                params = {"page_id": target_page_id, "message": message}
+                action = self.ACTION_TEXT_POST
+ 
+            result = await self.composio_executor.execute_action(action=action, params=params)
+            normalized = self._normalize(result)
+            logger.info(
+                f"Facebook post done. success={normalized['successful']} id={normalized['post_id']}"
+            )
+            return normalized
+ 
+        except ComposioAuthRequired:
+            raise
+        except Exception as e:  # noqa: BLE001
+            if "ComposioAuthRequired" in type(e).__name__:
+                raise
+            logger.exception(f"Exception during Facebook Page post: {e}")
+            return self._error(str(e))
+ 
     async def upload_reel(
         self,
         video_url: str,
         caption: str = "",
         page_id: Optional[str] = None,
         title: Optional[str] = None,
-        truncate: bool = True
+        truncate: bool = True,
     ) -> Dict[str, Any]:
         """
-        Upload a reel (video) to Facebook Page using FACEBOOK_CREATE_VIDEO_POST.
-        
-        Args:
-            video_url: URL of the video file
-            caption: Video caption/description
-            page_id: Facebook Page ID
-            title: Video title
-            truncate: Whether to auto-truncate description
-            
-        Returns:
-            Dict with successful, post_id, post_url, error
+        Publish a video/reel to a Page (FACEBOOK_CREATE_VIDEO_POST).
+ 
+        Returns: {"successful", "post_id", "post_url", "error"}
         """
-        logger.info(f"Uploading Facebook Reel: {caption[:50]}...")
-        
-        # Use provided page_id or fall back to config
         target_page_id = page_id or self.page_id
-        
+        logger.info(f"Uploading Facebook video to Page {target_page_id}: {caption[:50]}...")
+ 
         if not target_page_id:
-             logger.warning("No Facebook Page ID provided or configured. Upload might fail.")
-             return {
-                 "successful": False,
-                 "error": "No Facebook Page ID configured",
-                 "post_id": None,
-                 "post_url": None
-             }
-
+            return self._error("No Facebook Page ID provided or configured.")
+        if not video_url:
+            return self._error("No video_url provided.")
+ 
         try:
-            # Ensure authentication
             await self._ensure_authentication()
-            
-            # Truncate description if needed
+ 
             if truncate and caption:
                 caption = self._truncate_text(caption)
-            
-            # Prepare parameters for FACEBOOK_CREATE_VIDEO_POST
-            params = {
-                "page_id": target_page_id,
-                "file_url": video_url,
-            }
-            
+ 
+            params: Dict[str, Any] = {"page_id": target_page_id, "file_url": video_url}
             if caption:
                 params["description"] = caption
-            
             if title:
                 params["title"] = title
-            
-            # Execute the upload action
-            logger.info(f"Executing FACEBOOK_CREATE_VIDEO_POST with params: {params}")
-            
-            # We use the action enum if available, or string name
-            try:
-                action = Action.FACEBOOK_CREATE_VIDEO_POST
-            except AttributeError:
-                # Fallback if enum not updated yet, though Composio usually has it
-                logger.warning("Action.FACEBOOK_CREATE_VIDEO_POST not found in Enum, using string lookup")
-                # This part is tricky if we can't pass string to execute_action directly if it expects Enum
-                # But ComposioExecutorService might handle it or we search for it
-                actions = await self.composio_executor.get_actions_for_app(self.app_name)
-                action = next((a for a in actions if a.name == "FACEBOOK_CREATE_VIDEO_POST"), None)
-                
-                if not action:
-                     return {
-                        "successful": False,
-                        "error": "FACEBOOK_CREATE_VIDEO_POST action not found",
-                        "post_id": None,
-                        "post_url": None
-                    }
-
+ 
+            logger.info(f"Executing FACEBOOK_CREATE_VIDEO_POST for page {target_page_id}")
             result = await self.composio_executor.execute_action(
-                action=action,
-                params=params
+                action=self.ACTION_VIDEO_POST, params=params
             )
-            
-            if result.get("successful", False):
-                post_id = result.get("data", {}).get("id")
-                # Constructing a generic URL
-                post_url = f"https://www.facebook.com/{post_id}" if post_id else None
-                
-                logger.info(f"Successfully uploaded Facebook Reel: {post_id}")
-                return {
-                    "successful": True,
-                    "post_id": post_id,
-                    "post_url": post_url,
-                    "error": None
-                }
-            else:
-                error_message = result.get("error", "Unknown error during upload")
-                logger.error(f"Failed to upload Facebook Reel: {error_message}")
-                return {
-                    "successful": False,
-                    "error": error_message,
-                    "post_id": None,
-                    "post_url": None
-                }
-                
+            normalized = self._normalize(result)
+            logger.info(
+                f"Facebook video done. success={normalized['successful']} id={normalized['post_id']}"
+            )
+            return normalized
+ 
         except ComposioAuthRequired:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if "ComposioAuthRequired" in type(e).__name__:
-                raise e
-            logger.exception(f"Exception during Facebook Reel upload: {str(e)}")
-            return {
-                "successful": False,
-                "error": str(e),
-                "post_id": None,
-                "post_url": None
-            }
-
-    async def post_to_page(
-        self,
-        message: str,
-        image_url: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Post text or image to Facebook Page.
-        Used by ManageContentUseCase.
-        """
-        logger.info(f"Posting to Facebook Page: {message[:50]}...")
-        
-        if not self.page_id:
-            logger.warning("No Facebook Page ID configured. Post might fail if action requires it.")
-
+                raise
+            logger.exception(f"Exception during Facebook video upload: {e}")
+            return self._error(str(e))
+ 
+    async def get_available_actions(self) -> Dict[str, Any]:
+        """List available Facebook action slugs (useful for debugging param/action names)."""
         try:
-            await self._ensure_authentication()
-            
-            # Check for available actions
             actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            
-            # Prefer photo post if image provided
-            if image_url:
-                post_action = None
-                for action in actions:
-                    if action.name == "FACEBOOK_CREATE_PHOTO_POST":
-                        post_action = action
-                        break
-                
-                if post_action:
-                    logger.info("Using FACEBOOK_CREATE_PHOTO_POST")
-                    params = {
-                        "message": message,
-                        "url": image_url
-                    }
-                    if self.page_id:
-                        params["page_id"] = self.page_id
-                        
-                    return await self.composio_executor.execute_action(
-                        action=post_action,
-                        params=params
-                    )
-                else:
-                    # Try fallback to Enum
-                    try:
-                        post_action = Action.FACEBOOK_CREATE_PHOTO_POST
-                        logger.info("Using FACEBOOK_CREATE_PHOTO_POST (from Enum)")
-                        params = {
-                            "message": message,
-                            "url": image_url
-                        }
-                        if self.page_id:
-                            params["page_id"] = self.page_id
-
-                        return await self.composio_executor.execute_action(
-                            action=post_action,
-                            params=params
-                        )
-                    except AttributeError:
-                        return {
-                            "successful": False,
-                            "error": "FACEBOOK_CREATE_PHOTO_POST not available",
-                            "post_id": None,
-                            "post_url": None
-                        }
-            
-            if not image_url:
-                 return {
-                    "successful": False,
-                    "error": "Text-only posting not currently supported by available actions (only FACEBOOK_CREATE_PHOTO_POST found)",
-                    "post_id": None,
-                    "post_url": None
-                }
-                
-            return {
-                "successful": False,
-                "error": "No suitable action found for posting",
-                "post_id": None,
-                "post_url": None
-            }
-
-        except ComposioAuthRequired:
-            raise
-        except Exception as e:
-            if "ComposioAuthRequired" in type(e).__name__:
-                raise e
-            logger.exception(f"Exception during Facebook Page post: {str(e)}")
-            return {
-                "successful": False,
-                "error": str(e),
-                "post_id": None,
-                "post_url": None
-            }
+            names = list(actions)
+            return {"successful": True, "actions": names, "count": len(names)}
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Failed to get Facebook actions: {e}")
+            return {"successful": False, "error": str(e), "actions": []}
+ 

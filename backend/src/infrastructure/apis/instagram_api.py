@@ -1,20 +1,19 @@
 import logging
 import asyncio
 from typing import Dict, Any, Optional
-from composio import Action
-
+ 
 from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
 from src import config
-
+ 
 logger = logging.getLogger(__name__)
-
-
+ 
+ 
 class InstagramAPI:
     """
     Instagram API wrapper using Composio for social media integration.
     Uses INSTAGRAM_CREATE_MEDIA_CONTAINER and INSTAGRAM_CREATE_POST for posting.
     """
-
+ 
     def __init__(self, entity_id: str):
         """Initialize Instagram API with Composio executor."""
         self.entity_id = entity_id
@@ -23,13 +22,13 @@ class InstagramAPI:
         self.max_caption_length = 2200
         self.ig_user_id = config.INSTAGRAM_BUSINESS_ACCOUNT_ID
         logger.info(f"InstagramAPI initialized for entity: {entity_id}, ig_user_id: {self.ig_user_id}")
-
+ 
     async def _ensure_authentication(self) -> None:
         """Ensure Instagram OAuth authentication."""
         await self.composio_executor.check_and_handle_authentication(
             app_name=self.app_name
         )
-
+ 
     def _truncate_text(self, text: str, max_length: int = None) -> str:
         """Truncate text to fit Instagram's caption limit."""
         if max_length is None:
@@ -37,7 +36,7 @@ class InstagramAPI:
         if len(text) <= max_length:
             return text
         return text[:max_length - 3] + "..."
-
+ 
     async def post_image(
         self,
         image_url: str,
@@ -83,7 +82,7 @@ class InstagramAPI:
             
             # Debug: List available actions
             actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            action_names = [action.name for action in actions]
+            action_names = list(actions)
             logger.info(f"Available Instagram actions: {action_names}")
             
             # STEP 1: Try to create media container using full action name
@@ -91,25 +90,8 @@ class InstagramAPI:
             
             # Try to find the action by full name
             container_action = None
-            for action in actions:
-                if action.name == "INSTAGRAM_CREATE_MEDIA_CONTAINER":
-                    container_action = action
-                    logger.info(f"Found action: {action.name}")
-                    break
+            container_action = "INSTAGRAM_CREATE_MEDIA_CONTAINER"
             
-            if not container_action:
-                # Try using Action enum directly
-                logger.warning("Action not in list, trying Action.INSTAGRAM_CREATE_MEDIA_CONTAINER directly...")
-                try:
-                    container_action = Action.INSTAGRAM_CREATE_MEDIA_CONTAINER
-                except AttributeError:
-                    logger.error("INSTAGRAM_CREATE_MEDIA_CONTAINER not available in Action enum")
-                    return {
-                        "successful": False,
-                        "error": f"INSTAGRAM_CREATE_MEDIA_CONTAINER not available. Available: {', '.join(action_names)}",
-                        "post_id": None,
-                        "post_url": None
-                    }
             
             # Execute container creation
             container_params = {
@@ -151,21 +133,8 @@ class InstagramAPI:
             
             # STEP 2: Create post
             post_action = None
-            for action in actions:
-                if action.name == "INSTAGRAM_CREATE_POST":
-                    post_action = action
-                    break
+            post_action = "INSTAGRAM_CREATE_POST"
             
-            if not post_action:
-                try:
-                    post_action = Action.INSTAGRAM_CREATE_POST
-                except AttributeError:
-                    return {
-                        "successful": False,
-                        "error": "INSTAGRAM_CREATE_POST not available",
-                        "post_id": None,
-                        "post_url": None
-                    }
             
             post_params = {
                 "ig_user_id": user_id,
@@ -207,7 +176,7 @@ class InstagramAPI:
                 "post_id": None,
                 "post_url": None
             }
-
+ 
     async def post_reel(
         self,
         video_url: str,
@@ -255,29 +224,16 @@ class InstagramAPI:
             
             # Debug: List available actions
             actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            action_names = [action.name for action in actions]
+            action_names = list(actions)
             logger.info(f"Available Instagram actions: {action_names}")
             
             # STEP 1: Create media container for Reel
             logger.info("Creating media container for Reel...")
             
             container_action = None
-            for action in actions:
-                if action.name == "INSTAGRAM_CREATE_MEDIA_CONTAINER":
-                    container_action = action
-                    break
+            container_action = "INSTAGRAM_CREATE_MEDIA_CONTAINER"
             
-            if not container_action:
-                try:
-                    container_action = Action.INSTAGRAM_CREATE_MEDIA_CONTAINER
-                except AttributeError:
-                    return {
-                        "successful": False,
-                        "error": "INSTAGRAM_CREATE_MEDIA_CONTAINER not available",
-                        "post_id": None,
-                        "post_url": None
-                    }
-
+ 
             # Prepare parameters for Reel container
             container_params = {
                 "ig_user_id": user_id,
@@ -322,16 +278,8 @@ class InstagramAPI:
             # Check container status before publishing
             # Find status action
             status_action = None
-            for action in actions:
-                if action.name == "INSTAGRAM_GET_POST_STATUS":
-                    status_action = action
-                    break
+            status_action = "INSTAGRAM_GET_POST_STATUS"
             
-            if not status_action:
-                try:
-                    status_action = Action.INSTAGRAM_GET_POST_STATUS
-                except AttributeError:
-                    logger.warning("INSTAGRAM_GET_POST_STATUS not found, skipping status check (might fail if not ready)")
             
             if status_action:
                 status_result = await self.composio_executor.execute_action(
@@ -387,22 +335,9 @@ class InstagramAPI:
             logger.info("Publishing Reel...")
             
             post_action = None
-            for action in actions:
-                if action.name == "INSTAGRAM_CREATE_POST":
-                    post_action = action
-                    break
+            post_action = "INSTAGRAM_CREATE_POST"
             
-            if not post_action:
-                try:
-                    post_action = Action.INSTAGRAM_CREATE_POST
-                except AttributeError:
-                    return {
-                        "successful": False,
-                        "error": "INSTAGRAM_CREATE_POST not available",
-                        "post_id": None,
-                        "post_url": None
-                    }
-
+ 
             publish_params = {
                 "ig_user_id": user_id,
                 "creation_id": creation_id
@@ -446,12 +381,12 @@ class InstagramAPI:
                 "post_id": None,
                 "post_url": None
             }
-
+ 
     async def get_available_actions(self) -> Dict[str, Any]:
         """Get all available Instagram actions from Composio."""
         try:
             actions = await self.composio_executor.get_actions_for_app(self.app_name)
-            action_names = [action.name for action in actions]
+            action_names = list(actions)
             
             logger.info(f"Found {len(action_names)} Instagram actions")
             
@@ -467,3 +402,4 @@ class InstagramAPI:
                 "error": str(e),
                 "actions": []
             }
+ 

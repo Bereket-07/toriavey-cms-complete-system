@@ -7,19 +7,18 @@ from typing import Dict, Any, Optional
 import mimetypes
 import hashlib
 import json
-from composio import Action
 from src.infrastructure.apis.composio import ComposioExecutorService, ComposioAuthRequired
 from src import config
 from src.utils.video_processor import prepare_video_for_shorts, get_video_duration
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
 class YouTubeAPI:
     """
     YouTube API wrapper using Composio for video uploads.
     Uses YOUTUBE_UPLOAD_VIDEO for posting shorts.
     """
-
+ 
     def __init__(self, entity_id: str):
         """Initialize YouTube API with Composio executor."""
         self.entity_id = entity_id
@@ -27,13 +26,13 @@ class YouTubeAPI:
         self.app_name = "YOUTUBE"
         self.max_description_length = 5000  # YouTube description limit
         logger.info(f"YouTubeAPI initialized for entity: {entity_id}")
-
+ 
     async def _ensure_authentication(self) -> None:
         """Ensure YouTube OAuth authentication."""
         await self.composio_executor.check_and_handle_authentication(
             app_name=self.app_name
         )
-
+ 
     def _truncate_text(self, text: str, max_length: int = None) -> str:
         """Truncate text to fit YouTube's description limit."""
         if max_length is None:
@@ -41,7 +40,7 @@ class YouTubeAPI:
         if len(text) <= max_length:
             return text
         return text[:max_length - 3] + "..."
-
+ 
     def _download_video(self, url: str) -> str:
         """Download video from URL to a temporary file."""
         try:
@@ -56,7 +55,7 @@ class YouTubeAPI:
                 possible_ext = "." + url.split("/")[-1].split(".")[-1].split("?")[0]
                 if len(possible_ext) <= 5: # Sanity check
                     ext = possible_ext
-
+ 
             with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
                 for chunk in response.iter_content(chunk_size=8192):
                     tmp_file.write(chunk)
@@ -67,9 +66,9 @@ class YouTubeAPI:
         except Exception as e:
             logger.error(f"Failed to download video: {e}")
             raise
-
-
-
+ 
+ 
+ 
     async def upload_short(
         self,
         video_file_path: str,
@@ -115,7 +114,7 @@ class YouTubeAPI:
                 upload_path = temp_file_path
             else:
                 upload_path = video_file_path
-
+ 
             # Preprocess the video if requested or if duration > 60s
             if preprocess:
                 try:
@@ -130,7 +129,7 @@ class YouTubeAPI:
                         logger.info(f"Video preprocessed for Shorts format: {processed_file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to preprocess video: {str(e)}. Using original video.")
-
+ 
             # Truncate description if needed
             if truncate and description:
                 description = self._truncate_text(description)
@@ -142,16 +141,9 @@ class YouTubeAPI:
             # Some creators also add #Shorts to the title
             if "#Shorts" not in title:
                 title = f"{title} #Shorts"
-
-            try:
-                upload_action = Action.YOUTUBE_UPLOAD_VIDEO
-            except AttributeError:
-                return {
-                    "successful": False,
-                    "error": "YOUTUBE_UPLOAD_VIDEO not available",
-                    "video_id": None,
-                    "video_url": None
-                }
+ 
+            # New SDK: actions are plain string slugs.
+            upload_action = "YOUTUBE_UPLOAD_VIDEO"
             
             # Upload file using ComposioExecutorService
             logger.info(f"Uploading file {upload_path} to Composio...")
@@ -170,7 +162,7 @@ class YouTubeAPI:
             
             file_id = upload_data.get("id")
             s3_key = upload_data.get("key") or upload_data.get("fileKey") or file_id
-
+ 
             # Prepare parameters for YouTube Shorts upload
             params = {
                 "title": title,
@@ -242,3 +234,4 @@ class YouTubeAPI:
                     logger.info(f"Removed processed file: {processed_file_path}")
                 except Exception as cleanup_err:
                     logger.warning(f"Failed to remove processed file {processed_file_path}: {cleanup_err}")
+ 
