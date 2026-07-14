@@ -407,7 +407,7 @@ export default function Dashboard() {
               <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#6ceeb0] to-[#34d399] p-[1px] shadow-[0_4px_20px_-4px_rgba(52,211,153,0.5)]">
                 <div className="bg-gradient-to-r from-[#e6f9f0] to-[#dcfce7] rounded-2xl p-4 flex items-center justify-between backdrop-blur-xl">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-[#10b981] flex items-center justify-center shadow-lg shadow-emerald-300/50">
+                    <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center shadow-lg shadow-emerald-300/50">
                       <Clock className="h-5 w-5 text-white" />
                     </div>
                     <div>
@@ -415,7 +415,7 @@ export default function Dashboard() {
                       <p className="text-xs text-[#065f46] font-medium opacity-80">{stats.scheduler.is_running ? 'Active & Running' : 'Schedule Paused'}</p>
                     </div>
                   </div>
-                  <Button onClick={() => navigate('/cms/scheduler')} className="bg-[#059669] hover:bg-[#047857] text-white rounded-xl shadow-lg shadow-emerald-200 border-none px-6 font-semibold">
+                  <Button onClick={() => navigate('/cms/scheduler')} className="bg-secondary hover:bg-secondary-hover text-white rounded-xl shadow-lg shadow-emerald-200 border-none px-6 font-semibold">
                     Schedule
                   </Button>
                 </div>
@@ -532,7 +532,7 @@ export default function Dashboard() {
               <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#a5b4fc] to-[#818cf8] p-[1px] shadow-[0_4px_20px_-4px_rgba(129,140,248,0.5)]">
                 <div className="bg-gradient-to-r from-[#eef2ff] to-[#e0e7ff] rounded-2xl p-4 flex items-center justify-between backdrop-blur-xl">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-[#6366f1] flex items-center justify-center shadow-lg shadow-indigo-300/50">
+                    <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-indigo-300/50">
                       <Play className="h-5 w-5 text-white fill-current ml-0.5" />
                     </div>
                     <div>
@@ -540,7 +540,7 @@ export default function Dashboard() {
                       <p className="text-xs text-[#3730a3] font-medium opacity-80">{stats.videoScheduler.running ? 'Watching Channel' : 'Ready to Repurpose'}</p>
                     </div>
                   </div>
-                  <Button onClick={() => navigate('/cms/clips')} className="bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl shadow-lg shadow-indigo-200 border-none px-6 font-semibold">
+                  <Button onClick={() => navigate('/cms/clips')} className="bg-primary hover:bg-primary-hover text-white rounded-xl shadow-lg shadow-indigo-200 border-none px-6 font-semibold">
                     Repurpose
                   </Button>
                 </div>
@@ -1009,3 +1009,4 @@ export default function Dashboard() {
     </TooltipProvider>
   );
 }
+

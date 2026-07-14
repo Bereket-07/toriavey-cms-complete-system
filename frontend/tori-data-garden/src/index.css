@@ -8,24 +8,32 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    /* Brand Colors - Warm Earth Tones */
-    --olive: 80 65% 45%;
-    --olive-light: 80 70% 55%;
-    --olive-dark: 80 60% 35%;
+    /* Brand Colors - Warm Editorial (aubergine + saffron on ivory) */
+    --aubergine: 312 27% 23%;
+    --aubergine-light: 312 22% 33%;
+    --aubergine-dark: 312 30% 17%;
 
-    --terracotta: 15 60% 55%;
-    --terracotta-light: 15 60% 70%;
-    --terracotta-dark: 15 60% 40%;
+    --saffron: 33 65% 48%;
+    --saffron-light: 36 62% 70%;
+    --saffron-dark: 33 68% 40%;
 
-    --cream: 40 50% 92%;
-    --cream-dark: 40 40% 85%;
+    /* keep old names as aliases so nothing breaks, remapped to new palette */
+    --olive: var(--aubergine);
+    --olive-light: var(--aubergine-light);
+    --olive-dark: var(--aubergine-dark);
+    --terracotta: var(--saffron);
+    --terracotta-light: var(--saffron-light);
+    --terracotta-dark: var(--saffron-dark);
 
-    --warm-white: 40 40% 98%;
-    --warm-gray: 40 10% 90%;
+    --cream: 40 45% 94%;
+    --cream-dark: 40 35% 88%;
 
-    --text-primary: 30 20% 20%;
-    --text-secondary: 30 15% 45%;
-    --text-muted: 30 10% 60%;
+    --warm-white: 40 40% 96%;
+    --warm-gray: 40 12% 88%;
+
+    --text-primary: 25 15% 15%;
+    --text-secondary: 30 12% 40%;
+    --text-muted: 30 10% 55%;
 
     /* Platform Colors */
     --youtube-red: 0 100% 50%;
@@ -69,9 +77,21 @@ All colors MUST be HSL.
     --radius: 0.75rem;
 
     /* Gradients */
-    --gradient-hero: linear-gradient(135deg, hsl(var(--olive)) 0%, hsl(var(--olive-light)) 100%);
-    --gradient-warm: linear-gradient(135deg, hsl(var(--terracotta-light)) 0%, hsl(var(--cream)) 100%);
-    --gradient-subtle: linear-gradient(180deg, hsl(var(--warm-white)) 0%, hsl(var(--cream)) 100%);
+    --gradient-hero: linear-gradient(
+      135deg,
+      hsl(var(--olive)) 0%,
+      hsl(var(--olive-light)) 100%
+    );
+    --gradient-warm: linear-gradient(
+      135deg,
+      hsl(var(--terracotta-light)) 0%,
+      hsl(var(--cream)) 100%
+    );
+    --gradient-subtle: linear-gradient(
+      180deg,
+      hsl(var(--warm-white)) 0%,
+      hsl(var(--cream)) 100%
+    );
 
     /* Shadows */
     --shadow-sm: 0 2px 8px hsla(var(--olive), 0.08);
@@ -142,7 +162,7 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Lato', sans-serif;
+    font-family: "Lato", sans-serif;
   }
 
   h1,
@@ -151,7 +171,7 @@ All colors MUST be HSL.
   h4,
   h5,
   h6 {
-    font-family: 'Playfair Display', serif;
+    font-family: "Playfair Display", serif;
   }
 }
 
@@ -177,7 +197,7 @@ All colors MUST be HSL.
   }
 
   .gradient-accent {
-    background: linear-gradient(135deg, #7C9A6D 0%, #5a7049 100%);
+    background: linear-gradient(135deg, #7c9a6d 0%, #5a7049 100%);
   }
 
   .glass-card {
