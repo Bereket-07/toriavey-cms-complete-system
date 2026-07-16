@@ -32,3 +32,10 @@ htmlcov/
 .DS_Store
 *.swp
 .idea/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.local
+npm-debug.log*
