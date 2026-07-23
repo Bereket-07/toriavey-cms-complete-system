@@ -24,10 +24,10 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-cream to-cream-dark">
-      <div className="w-full max-w-md bg-card rounded-2xl shadow-lg border border-border p-10 flex flex-col items-center">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(var(--cream))] to-[hsl(var(--sand))]">
+      <div className="w-full max-w-md bg-card rounded-2xl shadow-2xl p-10 flex flex-col items-center">
         {/* Logo or Brand Icon */}
-        <div className="mb-6 flex items-center justify-center w-32 h-16 bg-[#e9ecef]">
+        <div className="mb-6 flex items-center justify-center w-32 h-16 bg-muted/60">
           <img
             src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQWbcdlPhqd2hCcUi3QmH7IqfbjANs5yaF8bw&s"
             alt="Tori Avey Logo"
@@ -64,7 +64,7 @@ export default function Login() {
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="w-full py-2 px-4 bg-white border border-gray-300 rounded-lg flex items-center justify-center shadow hover:bg-gray-50 transition mb-4"
+          className="w-full py-2 px-4 bg-card border border-border rounded-lg flex items-center justify-center shadow hover:bg-muted transition mb-4"
         >
           <img
             src="https://developers.google.com/identity/images/g-logo.png"
@@ -76,9 +76,9 @@ export default function Login() {
 
         {/* Divider */}
         <div className="flex items-center w-full my-4">
-          <div className="flex-grow border-t border-gray-200"></div>
-          <span className="mx-2 text-xs text-gray-400">or</span>
-          <div className="flex-grow border-t border-gray-200"></div>
+          <div className="flex-grow border-t border-border"></div>
+          <span className="mx-2 text-xs text-muted-foreground">or</span>
+          <div className="flex-grow border-t border-border"></div>
         </div>
 
         {/* Username/Password (optional, visually de-emphasized) */}
@@ -89,7 +89,7 @@ export default function Login() {
           <div>
             <label
               htmlFor="username"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-muted-foreground mb-1"
             >
               Username
             </label>
@@ -99,13 +99,13 @@ export default function Login() {
               type="text"
               autoComplete="username"
               disabled
-              className="block w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 transition"
+              className="block w-full px-4 py-2 border border-border rounded-lg bg-muted/40 text-foreground transition"
             />
           </div>
           <div>
             <label
               htmlFor="password"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-muted-foreground mb-1"
             >
               Password
             </label>
@@ -115,12 +115,12 @@ export default function Login() {
               type="password"
               autoComplete="current-password"
               disabled
-              className="block w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 transition"
+              className="block w-full px-4 py-2 border border-border rounded-lg bg-muted/40 text-foreground transition"
             />
           </div>
           <button
             type="submit"
-            className="w-full py-2 px-4 bg-primary hover:bg-primary-hover text-white font-semibold rounded-lg shadow-md transition text-base"
+            className="w-full py-2 px-4 bg-primary text-white font-semibold rounded-lg shadow-md transition text-base"
             disabled
           >
             Sign In
