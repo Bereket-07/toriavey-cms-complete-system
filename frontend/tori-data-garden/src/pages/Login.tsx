@@ -2,6 +2,15 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
+/* Stage colours from the approved category system — used as a quiet
+   signature strip so the sign-in screen reads as this product. */
+const STAGES = [
+  { label: "New", color: "#94A3B8" },
+  { label: "Generated", color: "#7C3AED" },
+  { label: "Ready", color: "#F59E0B" },
+  { label: "Posted", color: "#16A34A" },
+];
+
 export default function Login() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -23,112 +32,132 @@ export default function Login() {
     window.location.href = `${backend}/auth/login`;
   };
 
+  const params = new URLSearchParams(window.location.search);
+  const errorCode = params.get("error");
+  let errorMsg: string | null = null;
+  if (errorCode) {
+    errorMsg = "Something went wrong signing in. Try again.";
+    if (errorCode === "unauthorized_email")
+      errorMsg =
+        "This Google account isn't on the access list. Ask an admin to add it.";
+    if (errorCode === "auth_failed")
+      errorMsg = "Google sign-in didn't complete. Try again.";
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(var(--cream))] to-[hsl(var(--sand))]">
-      <div className="w-full max-w-md bg-card rounded-2xl shadow-2xl p-10 flex flex-col items-center">
-        {/* Logo or Brand Icon */}
-        <div className="mb-6 flex items-center justify-center w-32 h-16 bg-muted/60">
-          <img
-            src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQWbcdlPhqd2hCcUi3QmH7IqfbjANs5yaF8bw&s"
-            alt="Tori Avey Logo"
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <h1 className="text-2xl font-semibold text-foreground mb-2 tracking-tight">
-          Tori Avey's Unified Dashboard
-        </h1>
-        <p className="text-muted-foreground mb-8 text-sm text-center">
-          Sign in to access analytics, content, and insights in one place
-        </p>
-
-        {/* Error Message Display */}
-        {(() => {
-          const params = new URLSearchParams(window.location.search);
-          const error = params.get("error");
-          if (error) {
-            let msg = "An error occurred during login.";
-            if (error === "unauthorized_email")
-              msg = "Access Denied: Your email is not authorized.";
-            if (error === "auth_failed")
-              msg = "Authentication failed. Please try again.";
-            return (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded w-full text-center">
-                {msg}
-              </div>
-            );
-          }
-          return null;
-        })()}
-
-        {/* Google OAuth Login Button */}
-        <button
-          onClick={handleGoogleLogin}
-          disabled={loading}
-          className="w-full py-2 px-4 bg-card border border-border rounded-lg flex items-center justify-center shadow hover:bg-muted transition mb-4"
+    <div className="min-h-screen w-full bg-background flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-card shadow-[var(--shadow-lg)] md:grid md:grid-cols-[1.05fr_1fr]">
+        {/* ---------- Brand panel (signature plum) ---------- */}
+        <div
+          className="relative overflow-hidden p-8 sm:p-10 md:p-12 flex flex-col justify-between"
+          style={{ background: "#7C3AED" }}
         >
-          <img
-            src="https://developers.google.com/identity/images/g-logo.png"
-            alt="Google"
-            className="w-5 h-5 mr-2"
+          {/* ambient rings */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full border border-white/15"
           />
-          {loading ? "Redirecting..." : "Sign in with Google"}
-        </button>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-10 top-24 h-56 w-56 rounded-full border border-white/10"
+          />
 
-        {/* Divider */}
-        <div className="flex items-center w-full my-4">
-          <div className="flex-grow border-t border-border"></div>
-          <span className="mx-2 text-xs text-muted-foreground">or</span>
-          <div className="flex-grow border-t border-border"></div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 font-display text-base font-semibold text-white ring-1 ring-white/25">
+                TA
+              </span>
+              <span className="leading-tight">
+                <span className="block font-display text-lg font-semibold text-white">
+                  Tori Avey
+                </span>
+                <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-white/70">
+                  Content Studio
+                </span>
+              </span>
+            </div>
+
+            <h1 className="mt-10 font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
+              Recipes in.
+              <br />
+              Posts out.
+            </h1>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/85">
+              Generate captions, approve them, publish to every channel, and
+              turn videos into clips — from one place.
+            </p>
+          </div>
+
+          {/* pipeline strip — the colour language of the app */}
+          <div className="relative z-10 mt-12">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
+              Content pipeline
+            </p>
+            <div className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-white/20">
+              {STAGES.map((s) => (
+                <span
+                  key={s.label}
+                  className="h-full flex-1"
+                  style={{ background: s.color }}
+                />
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+              {STAGES.map((s) => (
+                <span
+                  key={s.label}
+                  className="flex items-center gap-1.5 text-xs text-white/80"
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: s.color }}
+                  />
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Username/Password (optional, visually de-emphasized) */}
-        <form
-          className="w-full space-y-5 opacity-60 pointer-events-none"
-          onSubmit={(e) => e.preventDefault()}
-        >
-          <div>
-            <label
-              htmlFor="username"
-              className="block text-xs font-medium text-muted-foreground mb-1"
+        {/* ---------- Sign-in panel ---------- */}
+        <div className="flex flex-col justify-center p-8 sm:p-10 md:p-12">
+          <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
+            Sign in
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Use your approved Google account to continue.
+          </p>
+
+          {errorMsg && (
+            <div
+              role="alert"
+              className="mt-6 rounded-xl border border-[#DC2626]/25 bg-[#DC2626]/8 px-4 py-3 text-sm font-medium text-[#B91C1C]"
             >
-              Username
-            </label>
-            <input
-              id="username"
-              name="username"
-              type="text"
-              autoComplete="username"
-              disabled
-              className="block w-full px-4 py-2 border border-border rounded-lg bg-muted/40 text-foreground transition"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="password"
-              className="block text-xs font-medium text-muted-foreground mb-1"
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              disabled
-              className="block w-full px-4 py-2 border border-border rounded-lg bg-muted/40 text-foreground transition"
-            />
-          </div>
+              {errorMsg}
+            </div>
+          )}
+
           <button
-            type="submit"
-            className="w-full py-2 px-4 bg-primary text-white font-semibold rounded-lg shadow-md transition text-base"
-            disabled
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="group mt-7 flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-card px-5 py-3.5 text-sm font-semibold text-foreground shadow-[var(--shadow-sm)] transition-all hover:border-[#7C3AED]/40 hover:bg-[#7C3AED]/[0.04] hover:shadow-[var(--shadow-md)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Sign In
+            <img
+              src="https://developers.google.com/identity/images/g-logo.png"
+              alt=""
+              className="h-5 w-5"
+            />
+            {loading ? "Opening Google…" : "Continue with Google"}
           </button>
-        </form>
 
-        <div className="mt-6 text-center text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} Tori Avey. All rights reserved.
+          <p className="mt-5 text-xs leading-relaxed text-muted-foreground">
+            Access is limited to approved team accounts. If your account is
+            turned away, ask an admin to add it to the access list.
+          </p>
+
+          <div className="mt-10 border-t border-border pt-5 text-xs text-muted-foreground">
+            &copy; {new Date().getFullYear()} Tori Avey. All rights reserved.
+          </div>
         </div>
       </div>
     </div>
